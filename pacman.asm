@@ -7,7 +7,7 @@ SMALL_BMP_WIDTH = 40
 
 NULL = -1
 
-PLAYER_FILE_IN equ 'player2.bmp'
+PLAYER_FILE_IN equ 'player3.bmp'
 PAFILE_NAME_IN equ 'pause.bmp'
 
 SCREEN_WIDTH equ 320  
@@ -88,6 +88,7 @@ RED equ 4
 
 	player_hitbox_width dw 10  ; Smaller than visual sprite
 	player_hitbox_height dw 10 
+	player_bg_buffer db 16*16 dup (0)  ; Buffer for player background (adjust size as needed)
 
 
 
@@ -419,26 +420,112 @@ ShowBMP endp
 
 
 
-draw_player proc near
-	push ax
-	push bx
-	push dx
-	
-	mov dx, offset PlayerFileName
-	mov ax, [player_x_pos]
-	mov [BmpLeft], ax
-	mov ax, [player_y_pos]
-	mov [BmpTop], ax
-    mov [BmpWidth],  12   ; Set width
-    mov [BmpHeight], 12    ; Set height
-    call OpenShowBmp         
+; XOR-based player drawing
+draw_player_xor proc near
+    mov dx, offset PlayerFileName
+    mov ax, [player_x_pos]
+    mov [BmpLeft], ax
+    mov ax, [player_y_pos]
+    mov [BmpTop], ax
+    mov [BmpWidth], 12    ; Player width
+    mov [BmpHeight], 12   ; Player height
+    call OpenShowBmpXor    ; Use XOR version
+    ret
+draw_player_xor endp
+
+
+ShowBMPXor proc near
+    push cx
     
+    mov ax, 0A000h
+    mov es, ax
+    
+    mov ax, [BmpWidth]
+    mov bp, 0
+    and ax, 3
+    jz @@row_ok2
+    mov bp, 4
+    sub bp, ax
+    
+@@row_ok2:
+    mov cx, [BmpHeight]
+    dec cx
+    add cx, [BmpTop]
+    mov di, cx
+    shl cx, 6
+    shl di, 8
+    add di, cx
+    add di, [BmpLeft]
+    cld
+    
+    mov cx, [BmpHeight]
+@@NextLine2:
+    push cx
+    
+    mov ah, 3Fh
+    mov bx, [FileHandle]
+    mov cx, [BmpWidth]
+    add cx, bp
+    mov dx, offset ScrLine
+    int 21h
+    
+    mov cx, [BmpWidth]
+    mov si, offset ScrLine
+@@NextPixel:
+    lodsb                  ; Load pixel color into AL
+    
+    ; Skip black pixels (assuming black is background)
+    cmp al, 0              ; Is this black?
+    je @@SkipPixel
+    
+    ; XOR with the screen pixel
+    mov ah, es:[di]        ; Get current screen pixel
+    xor ah, al             ; XOR with BMP pixel
+    mov es:[di], ah        ; Store result
+    
+@@SkipPixel:
+    inc di                 ; Move to next screen position
+    loop @@NextPixel       ; Continue for all pixels in row
+    
+    sub di, [BmpWidth]
+    sub di, SCREEN_WIDTH
+    
+    pop cx
+    loop @@NextLine2
+    
+    pop cx
+    ret
+ShowBMPXor endp
+
+OpenShowBmpXor proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di  
+    
+    mov [ErrorFile], 0
+    call OpenBmpFile
+    cmp [ErrorFile], 1
+    je @@ExitProc3
+    
+    call ReadBmpHeader
+    call ReadBmpPalette
+    call CopyBmpPalette
+    call ShowBMPXor      ; Use XOR version instead of normal ShowBMP
+    call CloseBmpFile
+
+@@ExitProc3:
+    pop di
+    pop si
     pop dx
+    pop cx
     pop bx
     pop ax
     ret
+OpenShowBmpXor endp
 
-draw_player endp
 
 draw_pause_menu proc near
     push ax
@@ -823,40 +910,38 @@ check_wall_collision proc near
     ret
 check_wall_collision endp
 
-;-----------------------------------------------------
-; Start of the program
-;-----------------------------------------------------
+
 start:
     mov ax, @data
     mov ds, ax
     
     call SetGraphic
     call DrawMaze     ; Draw maze first
-    call draw_player   ; Then draw player
-
-game_loop:
-    ; Clear player's old position by redrawing the maze at that position
-    call clear_player
+    call draw_player_xor   ; Draw player using XOR method
     
-    ; Store old position in case we need to restore it
+game_loop:
+    ; Since we're using XOR, drawing again will erase the player
+    call draw_player_xor   ; This removes the old player
+    
+    ; Store old position
     push [player_x_pos]
     push [player_y_pos]
     
     ; Check for input and update player position
     call check_input
     
-    ; Check if ESC was pressed (returns non-zero in AX)
+    ; Check if ESC was pressed
     cmp ax, 0
     jnz exit_game
     
-    ; Draw player at new position
-    call draw_player
+    ; Draw player at new position (XOR method)
+    call draw_player_xor
     
     ; Add delay for game speed
     mov cx, 1
 delay_loop:
     push cx
-    mov cx, 5000  ; Adjust for speed (reduced from 10000)
+    mov cx, 5000  ; Adjust for speed
 inner_delay:
     loop inner_delay
     pop cx
@@ -872,6 +957,5 @@ exit_game:
     int 10h
     mov ax, 4c00h ; Exit to DOS
     int 21h	
-	
 	
 END start
