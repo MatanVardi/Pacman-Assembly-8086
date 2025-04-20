@@ -7,7 +7,7 @@ SMALL_BMP_WIDTH = 40
 
 NULL = -1
 
-PLAYER_FILE_IN equ 'player3.bmp'
+PLAYER_FILE_IN equ 'player2.bmp'
 PAFILE_NAME_IN equ 'pause.bmp'
 
 SCREEN_WIDTH equ 320  
@@ -53,7 +53,7 @@ RED equ 4
     y_pos dw 0           ; Current Y position for drawing
     colorMaze db BLUE        ; Color to draw (blue for walls)
 	
-	    ScrLine db SCREEN_WIDTH dup (0)  ; One Color line read buffer
+	ScrLine db SCREEN_WIDTH dup (0)  ; One Color line read buffer
 
     FileHandle dw ?
     Header db 54 dup(0)
@@ -328,22 +328,45 @@ CopyBmpPalette proc near
     inc dx
     
 CopyNextColor:
-    mov al, [si+2]
+    ; Check if this is color index 1 (BLUE)
+    push cx
+    mov ax, 256
+    sub ax, cx
+    cmp ax, 1         ; Is this color index 1?
+    pop cx
+    jne NotBlueIndex
+    
+    ; Special handling for color 1 (BLUE)
+    mov al, 0         ; Red component (0 for blue)
+    out dx, al
+    mov al, 0         ; Green component (0 for blue)
+    out dx, al
+    mov al, 63        ; Blue component (maximum)
+    out dx, al
+    add si, 4         ; Skip this color in palette data
+    jmp NextColor
+    
+NotBlueIndex:
+    ; Regular color copying
+    mov al, [si+2]    ; Blue component from BMP
     shr al, 2
     out dx, al
-    mov al, [si+1]
+    mov al, [si+1]    ; Green component
     shr al, 2
     out dx, al
-    mov al, [si]
+    mov al, [si]      ; Red component
     shr al, 2
     out dx, al
     add si, 4
+    
+NextColor:
     loop CopyNextColor
     
     pop dx
     pop cx
     ret
 CopyBmpPalette endp
+
 
 ShowBMP proc near
     push cx
