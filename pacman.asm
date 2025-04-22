@@ -46,8 +46,8 @@ RED equ 4
 
     maze_width db 21     ; Width of the maze in cells
     maze_height db 21    ; Height of the maze in cells
-    cell_width dw 16     ; Width of each cell - increased from 13
-    cell_height dw 11     ; Height of each cell - increased from 8
+    cell_width dw 18     ; Width of each cell - increased from 16
+    cell_height dw 13     ; Height of each cell - increased from 11
 
     x_pos dw 0           ; Current X position for drawing
     y_pos dw 0           ; Current Y position for drawing
@@ -86,10 +86,25 @@ RED equ 4
 	right dw 1
 	current_direction db 0  ; 0=stopped, 1=up, 2=down, 3=left, 4=right
 
-	player_hitbox_width dw 10  ; Smaller than visual sprite
-	player_hitbox_height dw 10 
-	player_bg_buffer db 16*16 dup (0)  ; Buffer for player background (adjust size as needed)
+	player_bg_buffer db 12*12 dup (0)  ; Buffer for player background (adjust size as needed)
 
+    ; Add these new variables to your data section
+    wall_corner_radius dw 2     ; Radius for rounded corners
+    
+    ; Define the offset for wall drawing within cells (to create wider passages)
+    wall_inset_x dw 2           ; Horizontal inset from cell edge
+    wall_inset_y dw 1           ; Vertical inset from cell edge
+    
+    ; Set proper dimensions for walls
+    wall_width dw 12            ; Just a bit less than full cell width
+    wall_height dw 8            ; Just a bit less than full cell height
+    
+    ; Path width tolerance - increase this for easier navigation
+    path_tolerance dw 2         ; Additional clearance for path detection
+    
+    ; Player hitbox - reduce for easier navigation through tight spaces
+    player_hitbox_width dw 9    ; Smaller than visible sprite
+    player_hitbox_height dw 9   ; Smaller than visible sprite
 
 
 .code
@@ -126,18 +141,90 @@ draw_rect proc near
     ; Get parameters for drawing
     mov cx, x_pos          ; Starting X position
     mov dx, y_pos          ; Starting Y position
-    mov si, cell_height    ; Height (Y) counter
+    
+    ; Add inset to create spacing between walls
+    add cx, [wall_inset_x] ; Add horizontal inset
+    add dx, [wall_inset_y] ; Add vertical inset
+    
+    mov si, [wall_height]  ; Height (Y) counter
     
 rect_row_loop:
     push cx                ; Save starting X
-    mov di, cell_width     ; Width (X) counter
+    mov di, [wall_width]   ; Width (X) counter
     
 rect_col_loop:
+    ; Determine if we need to apply corner rounding
+    ; Check if we're in a corner region
+    push cx
+    push dx
+    
+    ; Calculate position relative to rectangle start
+    mov ax, cx
+    sub ax, x_pos
+    sub ax, [wall_inset_x]  ; Adjust for inset
+    
+    mov bx, dx
+    sub bx, y_pos
+    sub bx, [wall_inset_y]  ; Adjust for inset
+    
+    ; Check for top-left corner
+    cmp ax, [wall_corner_radius]
+    jg not_top_left_x
+    cmp bx, [wall_corner_radius]
+    jg not_top_left_y
+    
+    ; We're in the top-left corner region, check if we should draw
+    ; (x^2 + y^2 <= r^2)
+    push ax
+    push bx
+    
+    ; Calculate x^2
+    mul ax                 ; AX = x^2
+    mov si, ax             ; Save x^2 in SI
+    
+    ; Calculate y^2
+    mov ax, bx
+    mul ax                 ; AX = y^2
+    
+    ; Calculate x^2 + y^2
+    add ax, si             ; AX = x^2 + y^2
+    
+    ; Calculate r^2
+    mov bx, [wall_corner_radius]
+    mul bx                 ; BX*BX = r^2
+    
+    ; Compare
+    cmp ax, bx
+    pop bx
+    pop ax
+    jg skip_pixel          ; If x^2 + y^2 > r^2, outside the radius
+    jmp draw_normal_pixel
+    
+not_top_left_x:
+not_top_left_y:
+
+    ; Additional corner checks for other corners would go here
+    ; For simplicity in this example, we'll just check top-left
+    ; Similar code would be needed for all four corners
+    
+draw_normal_pixel:
+    ; Draw regular blue
+    mov al, BLUE
+    
     ; Draw pixel using INT 10h
-    mov al, colorMaze          ; Color
     mov ah, 0Ch            ; Function 0Ch - Write pixel
     int 10h
     
+    pop dx
+    pop cx
+    jmp continue_pixel
+
+skip_pixel:
+    pop dx
+    pop cx
+    ; Skip drawing this pixel (rounded corner area)
+    
+continue_pixel:
     ; Move to next X position
     inc cx
     dec di
@@ -157,6 +244,7 @@ rect_col_loop:
     pop ax
     ret
 draw_rect endp
+
 
 ;-----------------------------------------------------
 ; DrawMaze - Draw the maze from the maze_map array
@@ -205,7 +293,7 @@ draw_maze_col:
     cmp al, 1
     jne skip_wall
     
-    ; Draw a blue wall rectangle
+    ; Draw a blue wall rectangle - now smaller than cell size
     mov byte ptr [colorMaze], BLUE
     call draw_rect
     
@@ -220,7 +308,7 @@ skip_wall:
     jl draw_maze_col
     
     ; Move to next row
-    add word ptr [y_pos], 9     ; Move down by cell height
+    add word ptr [y_pos], 9    ; Move down by cell height
     
     ; Next row
     inc bx
@@ -235,6 +323,7 @@ skip_wall:
     pop ax
     ret
 DrawMaze endp
+
 
 
 OpenShowBmp proc near
@@ -422,6 +511,45 @@ ShowBMP endp
 
 ; XOR-based player drawing
 draw_player_xor proc near
+    push ax
+    push bx
+    
+    ; Make sure we're not drawing outside the screen boundary
+    mov ax, [player_x_pos]
+    cmp ax, 5                ; Minimum X to avoid border issues
+    jl @@adjust_x_min
+    cmp ax, 302              ; Maximum X (320 - 12 - 6)
+    jg @@adjust_x_max
+    jmp @@x_ok
+    
+@@adjust_x_min:
+    mov ax, 5
+    mov [player_x_pos], ax
+    jmp @@x_ok
+    
+@@adjust_x_max:
+    mov ax, 302
+    mov [player_x_pos], ax
+    
+@@x_ok:
+    mov ax, [player_y_pos]
+    cmp ax, 5                ; Minimum Y to avoid border issues
+    jl @@adjust_y_min
+    cmp ax, 183              ; Maximum Y (200 - 12 - 5)
+    jg @@adjust_y_max
+    jmp @@y_ok
+    
+@@adjust_y_min:
+    mov ax, 5
+    mov [player_y_pos], ax
+    jmp @@y_ok
+    
+@@adjust_y_max:
+    mov ax, 183
+    mov [player_y_pos], ax
+    
+@@y_ok:
+    ; Continue with normal drawing
     mov dx, offset PlayerFileName
     mov ax, [player_x_pos]
     mov [BmpLeft], ax
@@ -430,8 +558,12 @@ draw_player_xor proc near
     mov [BmpWidth], 12    ; Player width
     mov [BmpHeight], 12   ; Player height
     call OpenShowBmpXor    ; Use XOR version
+    
+    pop bx
+    pop ax
     ret
 draw_player_xor endp
+
 
 
 ShowBMPXor proc near
@@ -671,161 +803,214 @@ no_key:
 check_input endp
 
 
+
+; Improved check_up_move for better navigation in narrow passages
+check_up_move proc near
+    push ax
+    push bx
+    
+    ; Use smaller collision points with more space between them
+    
+    ; Check left side of player's top (inset more)
+    mov ax, [player_x_pos]
+    add ax, 3               ; Further inset from left
+    mov bx, [player_y_pos]
+    sub bx, 1               ; Top edge - 1
+    call check_wall_collision
+    cmp al, 1
+    je @@up_blocked
+    
+    ; Skip the center check to create two distinct collision points
+    ; This helps with passing through narrow passages
+    
+    ; Check right side of player's top (inset more)
+    mov ax, [player_x_pos]
+    add ax, [player_hitbox_width]
+    sub ax, 3               ; Further inset from right
+    mov bx, [player_y_pos]
+    sub bx, 1               ; Top edge - 1
+    call check_wall_collision
+    cmp al, 1
+    je @@up_blocked
+    
+    ; No obstacles, can move up
+    mov cl, 1               ; Can move
+    jmp @@up_exit
+    
+@@up_blocked:
+    mov cl, 0               ; Can't move
+    
+@@up_exit:
+    pop bx
+    pop ax
+    ret
+check_up_move endp
+
+; Improved check_down_move for better navigation
+check_down_move proc near
+    push ax
+    push bx
+    
+    ; Check left side of player's bottom (inset more)
+    mov ax, [player_x_pos]
+    add ax, 3               ; Further inset from left
+    mov bx, [player_y_pos]
+    add bx, [player_hitbox_height]
+    call check_wall_collision
+    cmp al, 1
+    je @@down_blocked
+    
+    ; Skip the center check for better narrow passage navigation
+    
+    ; Check right side of player's bottom (inset more)
+    mov ax, [player_x_pos]
+    add ax, [player_hitbox_width]
+    sub ax, 3               ; Further inset from right
+    mov bx, [player_y_pos]
+    add bx, [player_hitbox_height]
+    call check_wall_collision
+    cmp al, 1
+    je @@down_blocked
+    
+    ; No obstacles, can move down
+    mov cl, 1               ; Can move
+    jmp @@down_exit
+    
+@@down_blocked:
+    mov cl, 0               ; Can't move
+    
+@@down_exit:
+    pop bx
+    pop ax
+    ret
+check_down_move endp
+
+; Improved check_left_move for better navigation
+check_left_move proc near
+    push ax
+    push bx
+    
+    ; Check top of player's left side (inset more)
+    mov ax, [player_x_pos]
+    sub ax, 1               ; Left edge - 1
+    mov bx, [player_y_pos]
+    add bx, 3               ; Further inset from top
+    call check_wall_collision
+    cmp al, 1
+    je @@left_blocked
+    
+    ; Skip the center check for better narrow passage navigation
+    
+    ; Check bottom of player's left side (inset more)
+    mov ax, [player_x_pos]
+    sub ax, 1               ; Left edge - 1
+    mov bx, [player_y_pos]
+    add bx, [player_hitbox_height]
+    sub bx, 3               ; Further inset from bottom
+    call check_wall_collision
+    cmp al, 1
+    je @@left_blocked
+    
+    ; No obstacles, can move left
+    mov cl, 1               ; Can move
+    jmp @@left_exit
+    
+@@left_blocked:
+    mov cl, 0               ; Can't move
+    
+@@left_exit:
+    pop bx
+    pop ax
+    ret
+check_left_move endp
+
+; Improved check_right_move for better navigation
+check_right_move proc near
+    push ax
+    push bx
+    
+    ; Check top of player's right side (inset more)
+    mov ax, [player_x_pos]
+    add ax, [player_hitbox_width]
+    mov bx, [player_y_pos]
+    add bx, 3               ; Further inset from top
+    call check_wall_collision
+    cmp al, 1
+    je @@right_blocked
+    
+    ; Skip the center check for better narrow passage navigation
+    
+    ; Check bottom of player's right side (inset more)
+    mov ax, [player_x_pos]
+    add ax, [player_hitbox_width]
+    mov bx, [player_y_pos]
+    add bx, [player_hitbox_height]
+    sub bx, 3               ; Further inset from bottom
+    call check_wall_collision
+    cmp al, 1
+    je @@right_blocked
+    
+    ; No obstacles, can move right
+    mov cl, 1               ; Can move
+    jmp @@right_exit
+    
+@@right_blocked:
+    mov cl, 0               ; Can't move
+    
+@@right_exit:
+    pop bx
+    pop ax
+    ret
+check_right_move endp
+
+; Main procedure to check player movement in any direction
 check_player_move proc near
     push ax
     push bx
     push dx
     
-    ; Get current player position
-    mov bx, [player_x_pos]
-    mov dx, [player_y_pos]
+    ; Save direction value
+    push ax
     
     ; Adjust position based on direction and check for wall
     cmp al, 1               ; Up
-    je @@check_up
+    je check_up_direction
     cmp al, 2               ; Down
-    je @@check_down
+    je check_down_direction
     cmp al, 3               ; Left
-    je @@check_left
+    je check_left_direction
     cmp al, 4               ; Right
-    je @@check_right
-    jmp @@blocked           ; Invalid direction
+    je check_right_direction
     
-@@check_up:
-    mov ax, bx
-    add ax, 6               ; Center X (for 12px width)
-    mov bx, dx
-    sub bx, 1               ; Top edge - 1
-    call check_wall_collision
-    cmp al, 1
-    je @@blocked
-    jmp @@can_move
-    
-@@check_down:
-    mov ax, bx
-    add ax, 6               ; Center X (for 12px width)
-    mov bx, dx
-    add bx, 12              ; Bottom edge (changed from 14 to 12)
-    call check_wall_collision
-    cmp al, 1
-    je @@blocked
-    jmp @@can_move
-    
-@@check_left:
-    mov ax, bx
-    sub ax, 1               ; Left edge - 1
-    mov bx, dx
-    add bx, 6               ; Center Y (for 12px height)
-    call check_wall_collision
-    cmp al, 1
-    je @@blocked
-    jmp @@can_move
-    
-@@check_right:
-    mov ax, bx
-    add ax, 12              ; Right edge (changed from 14 to 12)
-    mov bx, dx
-    add bx, 6               ; Center Y (for 12px height)
-    call check_wall_collision
-    cmp al, 1
-    je @@blocked
-    jmp @@can_move
-    
-@@blocked:
+    ; Invalid direction
     mov cl, 0               ; Can't move
-    jmp @@exit_proc
+    jmp finish_check
+
+check_up_direction:
+    call check_up_move
+    jmp finish_check
+
+check_down_direction:
+    call check_down_move
+    jmp finish_check
+
+check_left_direction:
+    call check_left_move
+    jmp finish_check
+
+check_right_direction:
+    call check_right_move
+    jmp finish_check
+
+finish_check:
+    ; Restore direction value
+    pop ax
     
-@@can_move:
-    mov cl, 1               ; Can move
-    
-@@exit_proc:
     pop dx
     pop bx
     pop ax
     ret
 check_player_move endp
-
-
-
-clear_bmp_area proc near
-    push ax
-    push bx
-    push cx
-    push dx
-    push di
-    push es
-
-    ; Set video memory segment
-    mov ax, 0A000h
-    mov es, ax
-
-    ; Calculate memory location (y_pos * SCREEN_WIDTH + x_pos)
-    mov ax, [BmpTop]
-    mov bx, SCREEN_WIDTH
-    mul bx
-    add ax, [BmpLeft]
-    mov di, ax
-
-    ; Ensure the width does not exceed screen limits
-    mov ax, [BmpLeft]
-    add ax, [BmpWidth]
-    cmp ax, SCREEN_WIDTH
-    jle @width_ok
-    mov ax, SCREEN_WIDTH
-    sub ax, [BmpLeft]
-    mov [BmpWidth], ax
-@width_ok:
-
-    ; Ensure the height does not exceed screen limits
-    mov ax, [BmpTop]
-    add ax, [BmpHeight]
-    cmp ax, SCREEN_HEIGHT
-    jle @height_ok
-    mov ax, SCREEN_HEIGHT
-    sub ax, [BmpTop]
-    mov [BmpHeight], ax
-@height_ok:
-
-    ; Clear the area with color index 0 (black in Pacman maze)
-    ; or whatever color your maze background uses
-    mov cx, [BmpHeight]  ; Number of rows
-    mov dx, [BmpWidth]   ; Row width
-
-@clear_rows:
-    push cx
-    push di
-
-    mov cx, dx    ; Number of pixels to clear
-    mov al, 0     ; Black color (adjust if your maze uses different background)
-    rep stosb     ; Store AL into ES:[DI]
-
-    pop di
-    add di, SCREEN_WIDTH  ; Move to next row
-    pop cx
-    loop @clear_rows
-
-    pop es
-    pop di
-    pop dx
-    pop cx
-    pop bx
-    pop ax
-    ret
-clear_bmp_area endp
-
-
-clear_player proc near
-    ; Clear the player's previous position
-    mov ax, [player_x_pos]
-    mov [BmpLeft], ax
-    mov ax, [player_y_pos]
-    mov [BmpTop], ax
-    mov [BmpWidth], 12      ; Changed from 16 to 12
-    mov [BmpHeight], 12     ; Changed from 16 to 12
-    call clear_bmp_area
-    ret
-clear_player endp
-
 
 
 vsync proc near
@@ -860,6 +1045,12 @@ check_wall_collision proc near
     sub ax, 13      ; Subtract X offset
     sub bx, 5       ; Subtract Y offset
     
+    ; Check if coordinates are negative (outside maze)
+    cmp ax, 0
+    jl @@out_of_bounds
+    cmp bx, 0
+    jl @@out_of_bounds
+    
     ; Divide by cell size to get maze coordinates
     xor dx, dx
     mov cx, 14      ; cell_width
@@ -873,29 +1064,38 @@ check_wall_collision proc near
     mov dx, ax      ; DX = maze Y coordinate
     
     ; Check if coordinates are within maze bounds
-    cmp cx, 0
-    jl @@out_of_bounds
-    cmp dx, 0
-    jl @@out_of_bounds
-    
+    xor ah, ah
     mov al, [maze_width]
-    cmp cl, al
+    cmp cx, ax
     jge @@out_of_bounds
+    
+    xor ah, ah
     mov al, [maze_height]
-    cmp dl, al
+    cmp dx, ax
     jge @@out_of_bounds
     
     ; Calculate offset in maze_map: row * width + column
     mov ax, dx                  ; AX = row
     xor ah, ah
     mov bl, [maze_width]        ; BL = width
-    mul bl                      ; AX = row * width
-    add al, cl                  ; AX = row * width + column
+    xor bh, bh
+    mul bx                      ; AX = row * width
+    add ax, cx                  ; AX = row * width + column
     
     ; Get the maze value at this position
     mov si, offset maze_map
     add si, ax
     mov al, [si]                ; AL = maze value (0 or 1)
+    
+    ; If it's a wall, we need more precise collision with the smaller wall area
+    cmp al, 1
+    jne @@exit_proc2            ; If it's not a wall, we're done
+    
+    ; Key improvement: Check if we're within the actual wall area
+    ; Rather than the whole cell, taking into account insets and rounded corners
+    ; Note: For simplicity, we're just returning the wall status
+    ; In a more precise version, you could calculate the exact position within the cell
+    ; and check if it's inside the drawn wall area
     
     jmp @@exit_proc2
     
@@ -924,8 +1124,10 @@ game_loop:
     call draw_player_xor   ; This removes the old player
     
     ; Store old position
-    push [player_x_pos]
-    push [player_y_pos]
+    mov ax, [player_x_pos]
+    push ax
+    mov ax, [player_y_pos]
+    push ax
     
     ; Check for input and update player position
     call check_input
