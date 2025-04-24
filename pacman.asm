@@ -509,16 +509,117 @@ ShowBMP endp
 
 
 
-; XOR-based player drawing
-draw_player_xor proc near
+save_background proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    
+    ; Set video memory segment
+    mov ax, 0A000h
+    mov es, ax
+    
+    ; Calculate starting position in video memory
+    mov ax, 320            ; Screen width
+    mul [player_y_pos]     ; Y position * screen width
+    add ax, [player_x_pos] ; Add X position
+    mov si, ax             ; Source index = position in video memory
+    
+    ; Set destination to our buffer
+    mov di, offset player_bg_buffer
+    
+    ; Save 12x12 background
+    mov cx, 12             ; Player height
+@@save_row:
+    push cx
+    push si
+    
+    mov cx, 12             ; Player width
+@@save_col:
+    mov al, es:[si]        ; Get pixel from screen
+    mov [di], al           ; Store in buffer
+    inc si                 ; Next source pixel
+    inc di                 ; Next buffer position
+    loop @@save_col
+    
+    pop si
+    add si, 320            ; Move to next screen row
+    pop cx
+    dec cx
+    jnz @@save_row
+    
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+save_background endp
+
+; Restore background to erase player
+restore_background proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    
+    ; Set video memory segment
+    mov ax, 0A000h
+    mov es, ax
+    
+    ; Calculate starting position in video memory
+    mov ax, 320            ; Screen width
+    mul [player_y_pos]     ; Y position * screen width
+    add ax, [player_x_pos] ; Add X position
+    mov di, ax             ; Destination index = position in video memory
+    
+    ; Set source to our buffer
+    mov si, offset player_bg_buffer
+    
+    ; Restore 12x12 background
+    mov cx, 12             ; Player height
+@@restore_row:
+    push cx
+    push di
+    
+    mov cx, 12             ; Player width
+@@restore_col:
+    mov al, [si]           ; Get pixel from buffer
+    mov es:[di], al        ; Restore to screen
+    inc si                 ; Next buffer pixel
+    inc di                 ; Next screen position
+    loop @@restore_col
+    
+    pop di
+    add di, 320            ; Move to next screen row
+    pop cx
+    dec cx
+    jnz @@restore_row
+    
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+restore_background endp
+
+; Draw player with background saving
+draw_player proc near
     push ax
     push bx
     
-    ; Make sure we're not drawing outside the screen boundary
+    ; Boundary checks
     mov ax, [player_x_pos]
-    cmp ax, 5                ; Minimum X to avoid border issues
+    cmp ax, 5
     jl @@adjust_x_min
-    cmp ax, 302              ; Maximum X (320 - 12 - 6)
+    cmp ax, 302
     jg @@adjust_x_max
     jmp @@x_ok
     
@@ -533,9 +634,9 @@ draw_player_xor proc near
     
 @@x_ok:
     mov ax, [player_y_pos]
-    cmp ax, 5                ; Minimum Y to avoid border issues
+    cmp ax, 5
     jl @@adjust_y_min
-    cmp ax, 183              ; Maximum Y (200 - 12 - 5)
+    cmp ax, 183
     jg @@adjust_y_max
     jmp @@y_ok
     
@@ -549,114 +650,23 @@ draw_player_xor proc near
     mov [player_y_pos], ax
     
 @@y_ok:
-    ; Continue with normal drawing
+    ; Save background before drawing player
+    call save_background
+    
+    ; Draw player bitmap normally
     mov dx, offset PlayerFileName
     mov ax, [player_x_pos]
     mov [BmpLeft], ax
     mov ax, [player_y_pos]
     mov [BmpTop], ax
-    mov [BmpWidth], 12    ; Player width
-    mov [BmpHeight], 12   ; Player height
-    call OpenShowBmpXor    ; Use XOR version
+    mov [BmpWidth], 12
+    mov [BmpHeight], 12
+    call OpenShowBmp      ; Use regular BMP drawing, not XOR
     
     pop bx
     pop ax
     ret
-draw_player_xor endp
-
-
-
-ShowBMPXor proc near
-    push cx
-    
-    mov ax, 0A000h
-    mov es, ax
-    
-    mov ax, [BmpWidth]
-    mov bp, 0
-    and ax, 3
-    jz @@row_ok2
-    mov bp, 4
-    sub bp, ax
-    
-@@row_ok2:
-    mov cx, [BmpHeight]
-    dec cx
-    add cx, [BmpTop]
-    mov di, cx
-    shl cx, 6
-    shl di, 8
-    add di, cx
-    add di, [BmpLeft]
-    cld
-    
-    mov cx, [BmpHeight]
-@@NextLine2:
-    push cx
-    
-    mov ah, 3Fh
-    mov bx, [FileHandle]
-    mov cx, [BmpWidth]
-    add cx, bp
-    mov dx, offset ScrLine
-    int 21h
-    
-    mov cx, [BmpWidth]
-    mov si, offset ScrLine
-@@NextPixel:
-    lodsb                  ; Load pixel color into AL
-    
-    ; Skip black pixels (assuming black is background)
-    cmp al, 0              ; Is this black?
-    je @@SkipPixel
-    
-    ; XOR with the screen pixel
-    mov ah, es:[di]        ; Get current screen pixel
-    xor ah, al             ; XOR with BMP pixel
-    mov es:[di], ah        ; Store result
-    
-@@SkipPixel:
-    inc di                 ; Move to next screen position
-    loop @@NextPixel       ; Continue for all pixels in row
-    
-    sub di, [BmpWidth]
-    sub di, SCREEN_WIDTH
-    
-    pop cx
-    loop @@NextLine2
-    
-    pop cx
-    ret
-ShowBMPXor endp
-
-OpenShowBmpXor proc near
-    push ax
-    push bx
-    push cx
-    push dx
-    push si
-    push di  
-    
-    mov [ErrorFile], 0
-    call OpenBmpFile
-    cmp [ErrorFile], 1
-    je @@ExitProc3
-    
-    call ReadBmpHeader
-    call ReadBmpPalette
-    call CopyBmpPalette
-    call ShowBMPXor      ; Use XOR version instead of normal ShowBMP
-    call CloseBmpFile
-
-@@ExitProc3:
-    pop di
-    pop si
-    pop dx
-    pop cx
-    pop bx
-    pop ax
-    ret
-OpenShowBmpXor endp
+draw_player endp
 
 
 draw_pause_menu proc near
@@ -1117,11 +1127,11 @@ start:
     
     call SetGraphic
     call DrawMaze     ; Draw maze first
-    call draw_player_xor   ; Draw player using XOR method
+    call draw_player   ; Draw player using XOR method
     
 game_loop:
-    ; Since we're using XOR, drawing again will erase the player
-    call draw_player_xor   ; This removes the old player
+    ; Erase player by restoring background
+    call restore_background
     
     ; Store old position
     mov ax, [player_x_pos]
@@ -1136,8 +1146,8 @@ game_loop:
     cmp ax, 0
     jnz exit_game
     
-    ; Draw player at new position (XOR method)
-    call draw_player_xor
+    ; Draw player at new position
+    call draw_player
     
     ; Add delay for game speed
     mov cx, 1
@@ -1158,6 +1168,6 @@ exit_game:
     mov ax, 3     ; Text mode
     int 10h
     mov ax, 4c00h ; Exit to DOS
-    int 21h	
+    int 21h
 	
 END start
