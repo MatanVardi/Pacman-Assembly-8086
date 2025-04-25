@@ -9,7 +9,7 @@ NULL = -1
 
 PLAYER_FILE_IN equ 'player3.bmp'
 PAFILE_NAME_IN equ 'pause.bmp'
-
+MENU_FILE_IN equ 'menu.bmp'
 SCREEN_WIDTH equ 320  
 SCREEN_HEIGHT equ 200
 
@@ -79,7 +79,7 @@ RED equ 4
     player_y_pos dw 100
 	PlayerFileName db PLAYER_FILE_IN, 0
 	PAFileName db PAFILE_NAME_IN, 0
-	
+	MenuFileName db MENU_FILE_IN, 0
 	up dw 1
 	down dw 1
 	left dw 1
@@ -103,9 +103,9 @@ RED equ 4
     path_tolerance dw 2         ; Additional clearance for path detection
     
     ; Player hitbox - reduce for easier navigation through tight spaces
-    player_hitbox_width dw 9    ; Smaller than visible sprite
-    player_hitbox_height dw 9   ; Smaller than visible sprite
-
+    player_hitbox_width dw 8    ; Smaller than visible sprite
+    player_hitbox_height dw 8   ; Smaller than visible sprite
+	current_type dw 0
 
 .code
 
@@ -509,47 +509,26 @@ ShowBMP endp
 
 
 
-save_background proc near
+OpenShowBmpTransparent proc near
     push ax
     push bx
     push cx
     push dx
     push si
-    push di
+    push di  
     
-    ; Set video memory segment
-    mov ax, 0A000h
-    mov es, ax
+    mov [ErrorFile], 0
+    call OpenBmpFile
+    cmp [ErrorFile], 1
+    je @@ExitProc4
     
-    ; Calculate starting position in video memory
-    mov ax, 320            ; Screen width
-    mul [player_y_pos]     ; Y position * screen width
-    add ax, [player_x_pos] ; Add X position
-    mov si, ax             ; Source index = position in video memory
-    
-    ; Set destination to our buffer
-    mov di, offset player_bg_buffer
-    
-    ; Save 12x12 background
-    mov cx, 12             ; Player height
-@@save_row:
-    push cx
-    push si
-    
-    mov cx, 12             ; Player width
-@@save_col:
-    mov al, es:[si]        ; Get pixel from screen
-    mov [di], al           ; Store in buffer
-    inc si                 ; Next source pixel
-    inc di                 ; Next buffer position
-    loop @@save_col
-    
-    pop si
-    add si, 320            ; Move to next screen row
-    pop cx
-    dec cx
-    jnz @@save_row
-    
+    call ReadBmpHeader
+    call ReadBmpPalette
+    call CopyBmpPalette
+    call ShowBMPTransparent
+    call CloseBmpFile
+
+@@ExitProc4:
     pop di
     pop si
     pop dx
@@ -557,61 +536,76 @@ save_background proc near
     pop bx
     pop ax
     ret
-save_background endp
+OpenShowBmpTransparent endp
 
-; Restore background to erase player
-restore_background proc near
-    push ax
-    push bx
+; Draw BMP with transparency (black = transparent)
+ShowBMPTransparent proc near
     push cx
-    push dx
-    push si
-    push di
     
-    ; Set video memory segment
     mov ax, 0A000h
     mov es, ax
     
-    ; Calculate starting position in video memory
-    mov ax, 320            ; Screen width
-    mul [player_y_pos]     ; Y position * screen width
-    add ax, [player_x_pos] ; Add X position
-    mov di, ax             ; Destination index = position in video memory
+    mov ax, [BmpWidth]
+    mov bp, 0
+    and ax, 3
+    jz @@row_ok2
+    mov bp, 4
+    sub bp, ax
     
-    ; Set source to our buffer
-    mov si, offset player_bg_buffer
-    
-    ; Restore 12x12 background
-    mov cx, 12             ; Player height
-@@restore_row:
-    push cx
-    push di
-    
-    mov cx, 12             ; Player width
-@@restore_col:
-    mov al, [si]           ; Get pixel from buffer
-    mov es:[di], al        ; Restore to screen
-    inc si                 ; Next buffer pixel
-    inc di                 ; Next screen position
-    loop @@restore_col
-    
-    pop di
-    add di, 320            ; Move to next screen row
-    pop cx
+@@row_ok2:
+    mov cx, [BmpHeight]
     dec cx
-    jnz @@restore_row
+    add cx, [BmpTop]
+    mov di, cx
+    shl cx, 6
+    shl di, 8
+    add di, cx
+    add di, [BmpLeft]
+    cld
     
-    pop di
-    pop si
-    pop dx
+    mov cx, [BmpHeight]
+@@NextLine2:
+    push cx
+    
+    mov ah, 3Fh
+    mov bx, [FileHandle]
+    mov cx, [BmpWidth]
+    add cx, bp
+    mov dx, offset ScrLine
+    int 21h
+    
+    mov cx, [BmpWidth]
+    mov si, offset ScrLine
+@@NextPixel2:
+    lodsb                   ; Load pixel from BMP to AL
+    
+    ; Skip black pixels (transparent)
+    cmp al, 0
+    je @@SkipPixel2
+    
+    ; Skip drawing on blue walls
+    mov ah, es:[di]
+    cmp ah, BLUE
+    je @@SkipPixel2
+    
+    ; Draw non-black pixels
+    mov es:[di], al
+    
+@@SkipPixel2:
+    inc di
+    loop @@NextPixel2
+    
+    sub di, [BmpWidth]
+    sub di, SCREEN_WIDTH
+    
     pop cx
-    pop bx
-    pop ax
+    loop @@NextLine2
+    
+    pop cx
     ret
-restore_background endp
+ShowBMPTransparent endp
 
-; Draw player with background saving
-draw_player proc near
+draw_player_improved proc near
     push ax
     push bx
     
@@ -650,10 +644,10 @@ draw_player proc near
     mov [player_y_pos], ax
     
 @@y_ok:
-    ; Save background before drawing player
+    ; First, save the background
     call save_background
     
-    ; Draw player bitmap normally
+    ; Then set up drawing parameters
     mov dx, offset PlayerFileName
     mov ax, [player_x_pos]
     mov [BmpLeft], ax
@@ -661,12 +655,14 @@ draw_player proc near
     mov [BmpTop], ax
     mov [BmpWidth], 12
     mov [BmpHeight], 12
-    call OpenShowBmp      ; Use regular BMP drawing, not XOR
+    
+    ; Use transparent drawing (new method)
+    call OpenShowBmpTransparent
     
     pop bx
     pop ax
     ret
-draw_player endp
+draw_player_improved endp
 
 
 draw_pause_menu proc near
@@ -719,7 +715,7 @@ key_available:
     jne not_exit
     
     ; It's ESC, so set exit flag and return
-    mov ax, 1
+    call toggle_pause
     ret
     
 not_exit:
@@ -812,7 +808,69 @@ no_key:
     ret
 check_input endp
 
+handle_menu_input proc near
+    menu_wait:
+        mov ah, 00h       ; Wait for keypress
+        int 16h
+        
+        cmp al, 0Dh       ; Enter key
+        je start_game
+        
+        cmp al, 'o'       ; 'o' key
+        je exit_program
+        
+        jmp menu_wait     ; Invalid key, keep waiting
 
+    start_game:
+        call clear_screen
+        call run_game     ; This will never return
+        ret               ; Safety return (unreachable)
+
+    exit_program:
+        call ExitGraphic ; This will terminate the program
+        ret               ; Safety return (unreachable)
+handle_menu_input endp
+
+clear_screen proc near
+    push ax
+    push cx
+    push di
+    push es
+
+    mov ax, 0a000h   ; set es to point to vga memory segment
+    mov es, ax       
+    xor di, di       ; start at video memory offset 0
+    mov cx, 64000    ; 320 * 200 pixels
+    mov al, 0        ; black color
+    rep stosb        ; fill video memory with al (black)
+
+    pop es
+    pop di
+    pop cx
+    pop ax
+    ret
+clear_screen endp
+
+draw_menu proc near
+    push ax
+    push bx
+    push dx
+    
+    mov dx, offset MenuFileName 
+    mov ax, 0     
+    mov [BmpLeft], ax
+    mov ax, 0      
+    mov [BmpTop], ax
+    mov [BmpWidth],  320   ; Set width
+    mov [BmpHeight], 200    ; Set height
+    
+    call OpenShowBmp         
+    
+    pop dx
+    pop bx
+    pop ax
+    ret
+draw_menu endp
 
 ; Improved check_up_move for better navigation in narrow passages
 check_up_move proc near
@@ -1120,14 +1178,160 @@ check_wall_collision proc near
     ret
 check_wall_collision endp
 
-
-start:
-    mov ax, @data
-    mov ds, ax
+save_background proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
     
+    ; Set video memory segment
+    mov ax, 0A000h
+    mov es, ax
+    
+    ; Calculate starting position in video memory
+    mov ax, 320            ; Screen width
+    mul [player_y_pos]     ; Y position * screen width
+    add ax, [player_x_pos] ; Add X position
+    mov si, ax             ; Source index = position in video memory
+    
+    ; Set destination to our buffer
+    mov di, offset player_bg_buffer
+    
+    ; Save 12x12 background
+    mov cx, 12             ; Player height
+@@save_row:
+    push cx
+    push si
+    
+    mov cx, 12             ; Player width
+@@save_col:
+    mov al, es:[si]        ; Get pixel from screen
+    mov [di], al           ; Store in buffer
+    inc si                 ; Next source pixel
+    inc di                 ; Next buffer position
+    loop @@save_col
+    
+    pop si
+    add si, 320            ; Move to next screen row
+    pop cx
+    dec cx
+    jnz @@save_row
+    
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+save_background endp
+
+; Restore background to erase player
+restore_background proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    
+    ; Set video memory segment
+    mov ax, 0A000h
+    mov es, ax
+    
+    ; Calculate starting position in video memory
+    mov ax, 320            ; Screen width
+    mul [player_y_pos]     ; Y position * screen width
+    add ax, [player_x_pos] ; Add X position
+    mov di, ax             ; Destination index = position in video memory
+    
+    ; Set source to our buffer
+    mov si, offset player_bg_buffer
+    
+    ; Restore 12x12 background
+    mov cx, 12             ; Player height
+@@restore_row:
+    push cx
+    push di
+    
+    mov cx, 12             ; Player width
+@@restore_col:
+    mov al, [si]           ; Get pixel from buffer
+    mov es:[di], al        ; Restore to screen
+    inc si                 ; Next buffer pixel
+    inc di                 ; Next screen position
+    loop @@restore_col
+    
+    pop di
+    add di, 320            ; Move to next screen row
+    pop cx
+    dec cx
+    jnz @@restore_row
+    
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+restore_background endp
+
+
+toggle_pause proc near
+    cmp [current_type], 0
+    jz do_pause
+    ; Else unpause
+    mov [current_type], 0
+    ret
+
+do_pause:
+    mov [current_type], 1
+    call pause_menu
+    ret
+toggle_pause endp
+
+
+pause_menu proc near
+    call clear_screen
+    call draw_pause_menu
+
+pause_loop:
+    mov ah, 00h
+    int 16h
+    
+    cmp al, "o"
+    je exit
+    
+    cmp al, 1Bh   ; ESC pressed?
+    jne pause_loop
+    
+    call clear_screen
+    call run_game
+        
+exit:
+    call exit_and_cls
+pause_menu endp
+
+
+
+exit_and_cls proc near
+    call ExitGraphic  ; Return to text mode
+    mov ax, 4C00h     ; DOS exit function
+    int 21h           ; Call DOS
+    ret               ; This will never execute
+exit_and_cls endp
+
+
+
+run_game proc near
     call SetGraphic
     call DrawMaze     ; Draw maze first
-    call draw_player   ; Draw player using XOR method
+    
+    ; Draw initial player
+    call draw_player_improved
     
 game_loop:
     ; Erase player by restoring background
@@ -1142,12 +1346,8 @@ game_loop:
     ; Check for input and update player position
     call check_input
     
-    ; Check if ESC was pressed
-    cmp ax, 0
-    jnz exit_game
-    
     ; Draw player at new position
-    call draw_player
+    call draw_player_improved
     
     ; Add delay for game speed
     mov cx, 1
@@ -1165,9 +1365,17 @@ inner_delay:
     jmp game_loop
     
 exit_game:
-    mov ax, 3     ; Text mode
-    int 10h
+    call ExitGraphic
     mov ax, 4c00h ; Exit to DOS
     int 21h
-	
+run_game endp
+
+
+start:
+   mov ax, @data
+   mov ds, ax
+   call SetGraphic
+   call draw_menu
+   call handle_menu_input 
+   
 END start
