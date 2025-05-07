@@ -7,7 +7,7 @@ SMALL_BMP_WIDTH = 40
 
 NULL = -1
 
-PLAYER_FILE_IN equ 'player3.bmp'
+PLAYER_FILE_IN equ 'right1.bmp'
 PAFILE_NAME_IN equ 'pause.bmp'
 MENU_FILE_IN equ 'menu.bmp'
 SCREEN_WIDTH equ 320  
@@ -19,6 +19,7 @@ BLUE equ 1
 WHITE equ 15
 YELLOW equ 14
 RED equ 4
+GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 
 .data
     ; Define Pac-Man maze as a 2D array (1=wall, 0=empty)
@@ -43,14 +44,42 @@ RED equ 4
             db 0,1,0,1,1,1,1,1,1,0,1,0,1,1,1,1,1,1,0,1,0
             db 0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0
             db 0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0
+	score_text db 'Score: $'  ; String to display before score ($ is terminator)
 
+	little_coins_map db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; Row 0 (all zeros - top edge)
+				   db 0,0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,0  ; Row 1
+				   db 0,0,1,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,1,0,0  ; Row 2
+				   db 0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0  ; Row 3
+				   db 0,0,1,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,1,0,0  ; Row 4
+				   db 0,0,1,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,1,0,0  ; Row 5
+				   db 0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,0,0,0  ; Row 6
+				   db 0,0,0,0,0,1,0,1,1,1,1,1,1,1,0,1,0,0,0,0,0  ; Row 7
+				   db 0,0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0  ; Row 8
+				   db 0,0,0,0,0,1,1,1,0,0,0,0,0,1,1,1,0,0,0,0,0  ; Row 9 (mid - ghost house area)
+				   db 0,0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0  ; Row 10
+				   db 0,0,0,0,0,1,0,1,1,1,1,1,1,1,0,1,0,0,0,0,0  ; Row 11
+				   db 0,0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0  ; Row 12
+				   db 0,0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,0  ; Row 13
+				   db 0,0,1,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,1,0,0  ; Row 14
+				   db 0,0,1,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1,1,0,0  ; Row 15
+				   db 0,0,0,1,0,1,0,1,0,0,0,0,0,1,0,1,0,1,0,0,0  ; Row 16
+				   db 0,0,1,1,1,1,0,1,1,1,0,1,1,1,0,1,1,1,1,0,0  ; Row 17
+				   db 0,0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0,0  ; Row 18
+				   db 0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0  ; Row 19
+				   db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; Row 20 (all zeros - bottom edge)	
+		
+		
     maze_width db 21     ; Width of the maze in cells
     maze_height db 21    ; Height of the maze in cells
     cell_width dw 18     ; Width of each cell - increased from 16
     cell_height dw 13     ; Height of each cell - increased from 11
+	coins_collected db 21*21 dup(0)  ; Map to track collected coins (1=collected, 0=not collected)
 
     x_pos dw 0           ; Current X position for drawing
     y_pos dw 0           ; Current Y position for drawing
+	little_rect_x_pos dw 0
+	little_rect_y_pos dw 0
+	
     colorMaze db BLUE        ; Color to draw (blue for walls)
 	
 	ScrLine db SCREEN_WIDTH dup (0)  ; One Color line read buffer
@@ -103,10 +132,13 @@ RED equ 4
     path_tolerance dw 2         ; Additional clearance for path detection
     
     ; Player hitbox - reduce for easier navigation through tight spaces
-    player_hitbox_width dw 8    ; Smaller than visible sprite
-    player_hitbox_height dw 8   ; Smaller than visible sprite
+    player_hitbox_width dw 10    ; Smaller than visible sprite
+    player_hitbox_height dw 10   ; Smaller than visible sprite
 	current_type dw 0
 
+	current_score dw 0
+	
+	
 .code
 
 ;-----------------------------------------------------
@@ -245,6 +277,390 @@ continue_pixel:
     ret
 draw_rect endp
 
+; Draw a single coin at position (little_rect_x_pos, little_rect_y_pos)
+draw_coin proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Position for drawing
+    mov cx, little_rect_x_pos   ; X position
+    mov dx, little_rect_y_pos   ; Y position
+    
+    ; Draw a bright yellow dot (3x3 pixels)
+    mov al, GOLD_ORANGE         ; Use the golden orange color
+    
+    ; Draw a 3x3 pixel dot
+    ; Top row
+    mov ah, 0Ch                 ; Function to write pixel
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel
+    
+    ; Move back to start of next row
+    sub cx, 2
+    inc dx
+    
+    ; Middle row
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel (center pixel)
+    inc cx
+    int 10h                     ; Draw pixel
+    
+    ; Move back to start of next row
+    sub cx, 2
+    inc dx
+    
+    ; Bottom row
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+draw_coin endp
+
+; Draw a single coin at position (little_rect_x_pos, little_rect_y_pos)
+erase_coin proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Position for drawing
+    mov cx, little_rect_x_pos   ; X position
+    mov dx, little_rect_y_pos   ; Y position
+    
+    ; Draw a bright yellow dot (3x3 pixels)
+    mov al, BLACK         ; Use the golden orange color
+    
+    ; Draw a 3x3 pixel dot
+    ; Top row
+    mov ah, 0Ch                 ; Function to write pixel
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel
+    
+    ; Move back to start of next row
+    sub cx, 2
+    inc dx
+    
+    ; Middle row
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel (center pixel)
+    inc cx
+    int 10h                     ; Draw pixel
+    
+    ; Move back to start of next row
+    sub cx, 2
+    inc dx
+    
+    ; Bottom row
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel
+    inc cx
+    int 10h                     ; Draw pixel
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+erase_coin endp
+
+
+DrawCoins proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    
+    ; Calculate the starting position with the maze offsets
+    mov word ptr [x_pos], 13    ; Horizontal maze offset
+    mov word ptr [y_pos], 5     ; Vertical maze offset
+    
+    ; Loop through maze rows
+    xor bx, bx                  ; BX = row counter
+    
+draw_coins_row:
+    ; Reset X position for this row
+    mov ax, 13                  ; Horizontal maze offset
+    mov word ptr [x_pos], ax
+    
+    ; Loop through maze columns
+    xor cx, cx                  ; CX = column counter
+    
+draw_coins_col:
+    ; Skip outer border: rows 0 and 20, columns 0 and 20
+    cmp bx, 0
+    je skip_coin
+    cmp bx, 20
+    je skip_coin
+    cmp cx, 0
+    je skip_coin
+    cmp cx, 20
+    je skip_coin
+    
+    ; Calculate offset in maze_map: row * width + column
+    mov ax, bx                  ; AX = row
+    xor ah, ah
+    mov si, ax                  ; Save row in SI
+    mov al, [maze_width]        ; AL = width
+    mul si                      ; AX = row * width
+    add ax, cx                  ; AX = row * width + column
+    
+    ; Only place coins in pathways (not walls)
+    mov si, offset maze_map
+    add si, ax
+    mov al, [si]                ; AL = maze value (0 or 1)
+    
+    cmp al, 1                   ; Is it a wall?
+    je skip_coin                ; If wall, skip coin
+    
+    ; Define a larger ghost house area to ensure a clear middle space
+    ; Expanded ghost house area: rows 8-12, columns 7-13
+	cmp bx, 7                   ; Check if row >= 8
+	jl not_ghost_house
+	cmp bx, 13                  ; Check if row <= 13
+	jg not_ghost_house
+	cmp cx, 6                   ; Check if column >= 6
+	jl not_ghost_house
+	cmp cx, 14                  ; Check if column <= 14
+	jg not_ghost_house
+		
+    ; We're in the ghost house area, skip this coin
+    jmp skip_coin
+    
+not_ghost_house:
+    ; Calculate position for coin drawing - CENTER IT IN THE CELL
+    mov ax, [x_pos]
+    add ax, 7                   ; Center horizontally (cell width is 14, so +7)
+    mov [little_rect_x_pos], ax
+    
+    mov ax, [y_pos]
+    add ax, 5                   ; Better vertical centering (cell height is 9, so +5)
+    mov [little_rect_y_pos], ax
+    
+    ; Draw the coin at calculated position
+    call draw_coin
+    
+skip_coin:
+    ; Move to next column
+    add word ptr [x_pos], 14    ; Cell width
+    
+    ; Next column
+    inc cx
+    mov al, [maze_width]
+    cmp cl, al
+    jl draw_coins_col
+    
+    ; Move to next row
+    add word ptr [y_pos], 9     ; Cell height
+    
+    ; Next row
+    inc bx
+    mov al, [maze_height]
+    cmp bl, al
+    jl draw_coins_row
+    
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+DrawCoins endp
+
+check_coin_collision proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    
+    ; Calculate player's center in grid coordinates
+    mov ax, [player_x_pos]
+    add ax, 6                   ; Half of player width (12/2)
+    sub ax, 13                  ; Adjust for maze offset
+    mov bx, 14                  ; Cell width
+    xor dx, dx
+    div bx                      ; AX = player grid X, DX = remainder
+    mov cx, ax                  ; Save grid X in CX
+    
+    mov ax, [player_y_pos]
+    add ax, 6                   ; Half of player height (12/2)
+    sub ax, 5                   ; Adjust for maze offset
+    mov bx, 9                   ; Cell height
+    xor dx, dx
+    div bx                      ; AX = player grid Y, DX = remainder
+    mov bx, ax                  ; Save grid Y in BX
+    
+    ; Check bounds
+    cmp cx, 0
+    jl no_coin_here
+    cmp cx, 20
+    jge no_coin_here
+    cmp bx, 0
+    jl no_coin_here
+    cmp bx, 20
+    jge no_coin_here
+    
+    ; Calculate index in maze map: row * width + column
+    mov ax, bx                  ; AX = row
+    mov si, ax                  ; Save row in SI
+    mov al, [maze_width]        ; AL = width
+    mul si                      ; AX = row * width
+    add ax, cx                  ; AX = row * width + column
+    mov si, ax                  ; SI = index
+    
+    ; Check if this position is a wall (no coin possible)
+    mov di, offset maze_map
+    add di, si
+    mov al, [di]                ; Get maze value
+    
+    cmp al, 1                   ; Is it a wall?
+    je no_coin_here             ; If wall, exit - no coin possible
+    
+    ; Now check if this coin has already been collected
+    mov di, offset coins_collected
+    add di, si
+    mov al, [di]                ; Get collected status
+    
+    cmp al, 1                   ; Already collected?
+    je no_coin_here             ; If already collected, exit
+    
+    ; Check ghost house area - no coins there
+    cmp bx, 7                   ; Row >= 7
+    jl check_corners
+    cmp bx, 13                  ; Row <= 13
+    jg check_corners
+    cmp cx, 6                   ; Column >= 6
+    jl check_corners
+    cmp cx, 14                  ; Column <= 14
+    jg check_corners
+    
+    ; In ghost house area - skip
+    jmp no_coin_here
+    
+check_corners:
+    ; Skip coins in corner areas same as in DrawCoins
+    ; (Add any specific corner checks if needed)
+    
+    ; If we get here, it's a valid coin to collect!
+    
+    ; Mark as collected FIRST
+    mov byte ptr [di], 1
+    
+    ; Calculate screen position for the coin
+    mov ax, cx                  ; Grid X
+    mov si, 14                  ; Cell width
+    mul si                      ; AX = Grid X * cell width
+    add ax, 13                  ; Add horizontal maze offset
+    add ax, 7                   ; Center within cell
+    mov [little_rect_x_pos], ax ; Set X position for erasing
+    
+    mov ax, bx                  ; Grid Y
+    mov si, 9                   ; Cell height
+    mul si                      ; AX = Grid Y * cell height
+    add ax, 5                   ; Add vertical maze offset
+    add ax, 5                   ; Center within cell
+    mov [little_rect_y_pos], ax ; Set Y position for erasing
+    
+    ; Now erase the coin
+    call erase_coin
+    
+    ; Update score
+    add word ptr [current_score], 10
+    
+    ; Display updated score immediately
+    call display_score
+    
+no_coin_here:
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+check_coin_collision endp
+
+
+; Add this procedure to display the score
+display_score proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Position for score display (top-left corner)
+    mov ah, 02h      ; Set cursor position
+    mov bh, 0        ; Page number
+    mov dh, 0        ; Row 0 (top)
+    mov dl, 0        ; Column 0 (left)
+    int 10h
+    
+    ; Display "Score: "
+    mov ah, 09h      ; Display string function
+    mov dx, offset score_text
+    int 21h
+    
+    ; Convert score to ASCII and display
+    mov ax, [current_score]
+    call display_number
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+display_score endp
+
+; Helper procedure to display a number
+display_number proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Convert number in AX to decimal digits
+    mov bx, 10       ; Divisor
+    xor cx, cx       ; Digit counter
+    
+convert_loop:
+    xor dx, dx       ; Clear DX for division
+    div bx           ; AX / 10, quotient in AX, remainder in DX
+    push dx          ; Save remainder (current digit)
+    inc cx           ; Increment digit counter
+    test ax, ax      ; Check if quotient is zero
+    jnz convert_loop ; If not zero, continue loop
+    
+display_loop:
+    pop dx           ; Get digit
+    add dl, '0'      ; Convert to ASCII
+    mov ah, 02h      ; Function to display character
+    int 21h
+    loop display_loop
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+display_number endp
 
 ;-----------------------------------------------------
 ; DrawMaze - Draw the maze from the maze_map array
@@ -418,34 +834,57 @@ CopyBmpPalette proc near
     inc dx
     
 CopyNextColor:
-    ; Check if this is color index 1 (BLUE)
+    ; Get the current color index we're processing
     push cx
     mov ax, 256
     sub ax, cx
-    cmp ax, 1         ; Is this color index 1?
+    
+    ; We'll only override specific colors (BLUE=1, GOLD_ORANGE=16)
+    ; and leave all other colors (including player colors) untouched
+    
+    cmp ax, 1         ; Is this color index 1? (BLUE)
+    je SetBlue
+    
+    cmp ax, 16        ; Is this color index 16? (GOLD_ORANGE)
+    je SetGold
+    
+    ; For all other colors, copy directly from BMP (including player colors)
     pop cx
-    jne NotBlueIndex
+    mov al, [si+2]    ; Blue component
+    shr al, 2         ; Scale to VGA range (0-63)
+    out dx, al
     
-    ; Special handling for color 1 (BLUE)
-    mov al, 0         ; Red component (0 for blue)
-    out dx, al
-    mov al, 0         ; Green component (0 for blue)
-    out dx, al
-    mov al, 63        ; Blue component (maximum)
-    out dx, al
-    add si, 4         ; Skip this color in palette data
-    jmp NextColor
-    
-NotBlueIndex:
-    ; Regular color copying
-    mov al, [si+2]    ; Blue component from BMP
-    shr al, 2
-    out dx, al
     mov al, [si+1]    ; Green component
     shr al, 2
     out dx, al
+    
     mov al, [si]      ; Red component
     shr al, 2
+    out dx, al
+    
+    add si, 4         ; Move to next color in palette
+    jmp NextColor
+    
+SetBlue:
+    ; Special handling for BLUE (index 1)
+    pop cx
+    mov al, 0         ; Red = 0
+    out dx, al
+    mov al, 0         ; Green = 0
+    out dx, al
+    mov al, 63        ; Blue = max (63)
+    out dx, al
+    add si, 4
+    jmp NextColor
+    
+SetGold:
+    ; Special handling for GOLD_ORANGE (index 16)
+    pop cx
+    mov al, 63        ; Red = max (63)
+    out dx, al
+    mov al, 40        ; Green = medium (40)
+    out dx, al
+    mov al, 0         ; Blue = 0
     out dx, al
     add si, 4
     
@@ -456,7 +895,6 @@ NextColor:
     pop cx
     ret
 CopyBmpPalette endp
-
 
 ShowBMP proc near
     push cx
@@ -779,24 +1217,28 @@ auto_move_up:
     mov ax, [player_y_pos]
     sub ax, [up]
     mov [player_y_pos], ax
+	call check_coin_collision
     jmp no_key
     
 auto_move_down:
     mov ax, [player_y_pos]
     add ax, [down]
     mov [player_y_pos], ax
+	call check_coin_collision
     jmp no_key
     
 auto_move_left:
     mov ax, [player_x_pos]
     sub ax, [left]
     mov [player_x_pos], ax
+	call check_coin_collision
     jmp no_key
     
 auto_move_right:
     mov ax, [player_x_pos]
     add ax, [right]
     mov [player_x_pos], ax
+	call check_coin_collision
     jmp no_key
     
 stop_movement:
@@ -1330,8 +1772,36 @@ run_game proc near
     call SetGraphic
     call DrawMaze     ; Draw maze first
     
+    ; Initialize the coins_collected array to all zeros
+    push ax
+    push cx
+    push di
+    push es
+    
+    push ds
+    pop es            ; ES = DS for stosb
+    mov cx, 21*21     ; Size of coins_collected array (maze_width * maze_height)
+    mov di, offset coins_collected
+    mov al, 0         ; Value to fill (0 = not collected)
+    cld               ; Clear direction flag (increment DI)
+    rep stosb         ; Fill memory with zeros
+    
+    pop es
+    pop di
+    pop cx
+    pop ax
+    
+    ; Draw all coins after initializing collection map
+    call DrawCoins
+    
+    ; Reset score
+    mov word ptr [current_score], 0
+    
     ; Draw initial player
     call draw_player_improved
+    
+    ; Check for initial coin collision
+    call check_coin_collision
     
 game_loop:
     ; Erase player by restoring background
@@ -1344,16 +1814,20 @@ game_loop:
     push ax
     
     ; Check for input and update player position
+    ; Note: check_input now calls check_coin_collision after moving
     call check_input
     
     ; Draw player at new position
     call draw_player_improved
     
+    ; Display score (optional - if you implement this)
+    ; call display_score
+    
     ; Add delay for game speed
     mov cx, 1
 delay_loop:
     push cx
-    mov cx, 5000  ; Adjust for speed
+    mov cx, 5000  ; Adjust for speed (lower for faster)
 inner_delay:
     loop inner_delay
     pop cx
@@ -1369,7 +1843,6 @@ exit_game:
     mov ax, 4c00h ; Exit to DOS
     int 21h
 run_game endp
-
 
 start:
    mov ax, @data
