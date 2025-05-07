@@ -7,8 +7,17 @@ SMALL_BMP_WIDTH = 40
 
 NULL = -1
 
-PLAYER_FILE_IN equ 'right1.bmp'
+PAC_UP1_FILE equ 'up1.bmp'
+PAC_UP2_FILE equ 'up2.bmp'
+PAC_DOWN1_FILE equ 'down1.bmp'
+PAC_DOWN2_FILE equ 'down2.bmp'
+PAC_LEFT1_FILE equ 'left1.bmp'
+PAC_LEFT2_FILE equ 'left2.bmp'
+PAC_RIGHT1_FILE equ 'right1.bmp'
+PAC_RIGHT2_FILE equ 'right2.bmp'
+PAC_DEFAULT_FILE equ 'default.bmp'
 PAFILE_NAME_IN equ 'pause.bmp'
+
 MENU_FILE_IN equ 'menu.bmp'
 SCREEN_WIDTH equ 320  
 SCREEN_HEIGHT equ 200
@@ -106,7 +115,15 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
     
     player_x_pos dw 120
     player_y_pos dw 100
-	PlayerFileName db PLAYER_FILE_IN, 0
+	PacUp1FileName db PAC_UP1_FILE, 0
+	PacUp2FileName db PAC_UP2_FILE, 0
+	PacDown1FileName db PAC_DOWN1_FILE, 0
+	PacDown2FileName db PAC_DOWN2_FILE, 0
+	PacLeft1FileName db PAC_LEFT1_FILE, 0
+	PacLeft2FileName db PAC_LEFT2_FILE, 0
+	PacRight1FileName db PAC_RIGHT1_FILE, 0
+	PacRight2FileName db PAC_RIGHT2_FILE, 0
+	PacDefaultFileName db PAC_DEFAULT_FILE, 0
 	PAFileName db PAFILE_NAME_IN, 0
 	MenuFileName db MENU_FILE_IN, 0
 	up dw 1
@@ -138,7 +155,12 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 
 	current_score dw 0
 	
-	
+		; Animation variables
+	current_frame db 0          ; Current animation frame (0 or 1)
+	frame_counter db 6          ; Counter for animation timing
+	frame_delay db 20            ; How many game cycles before changing frames
+	is_moving db 0              ; Is Pacman currently moving?
+
 .code
 
 ;-----------------------------------------------------
@@ -1085,8 +1107,64 @@ draw_player_improved proc near
     ; First, save the background
     call save_background
     
-    ; Then set up drawing parameters
-    mov dx, offset PlayerFileName
+    mov dx, offset PacDefaultFileName  ; Default sprite
+    
+    mov al, [current_direction]
+    cmp al, 0                  ; Stopped
+    je @use_default
+    
+    cmp al, 1                  ; Up
+    jne @check_down
+    cmp [current_frame], 0
+    je @use_up1
+    mov dx, offset PacUp2FileName
+    jmp @draw_sprite
+    
+@use_up1:
+    mov dx, offset PacUp1FileName
+    jmp @draw_sprite
+    
+@check_down:
+    cmp al, 2                  ; Down
+    jne @check_left
+    cmp [current_frame], 0
+    je @use_down1
+    mov dx, offset PacDown2FileName
+    jmp @draw_sprite
+    
+@use_down1:
+    mov dx, offset PacDown1FileName
+    jmp @draw_sprite
+    
+@check_left:
+    cmp al, 3                  ; Left
+    jne @check_right
+    cmp [current_frame], 0
+    je @use_left1
+    mov dx, offset PacLeft2FileName
+    jmp @draw_sprite
+    
+@use_left1:
+    mov dx, offset PacLeft1FileName
+    jmp @draw_sprite
+    
+@check_right:
+    cmp al, 4                  ; Right
+    jne @use_default
+    cmp [current_frame], 0
+    je @use_right1
+    mov dx, offset PacRight2FileName
+    jmp @draw_sprite
+    
+@use_right1:
+    mov dx, offset PacRight1FileName
+    jmp @draw_sprite
+    
+@use_default:
+    mov dx, offset PacDefaultFileName
+    
+@draw_sprite:
+    ; Set up drawing parameters
     mov ax, [player_x_pos]
     mov [BmpLeft], ax
     mov ax, [player_y_pos]
@@ -1094,7 +1172,7 @@ draw_player_improved proc near
     mov [BmpWidth], 12
     mov [BmpHeight], 12
     
-    ; Use transparent drawing (new method)
+    ; Use transparent drawing
     call OpenShowBmpTransparent
     
     pop bx
@@ -1214,39 +1292,44 @@ continue_movement:
     jmp no_key
     
 auto_move_up:
+    mov [is_moving], 1        ; Set moving flag
     mov ax, [player_y_pos]
     sub ax, [up]
     mov [player_y_pos], ax
-	call check_coin_collision
+    call check_coin_collision
     jmp no_key
     
 auto_move_down:
+    mov [is_moving], 1        ; Set moving flag
     mov ax, [player_y_pos]
     add ax, [down]
     mov [player_y_pos], ax
-	call check_coin_collision
+    call check_coin_collision
     jmp no_key
     
 auto_move_left:
+    mov [is_moving], 1        ; Set moving flag
     mov ax, [player_x_pos]
     sub ax, [left]
     mov [player_x_pos], ax
-	call check_coin_collision
+    call check_coin_collision
     jmp no_key
     
 auto_move_right:
+    mov [is_moving], 1        ; Set moving flag
     mov ax, [player_x_pos]
     add ax, [right]
     mov [player_x_pos], ax
-	call check_coin_collision
+    call check_coin_collision
     jmp no_key
     
 stop_movement:
     mov [current_direction], 0  ; Stop moving
- 
+    mov [is_moving], 0          ; Not moving
+    
 no_key:
     ; Clear the exit flag
-    xor ax, ax    ; Clear AX
+    xor ax, ax
     ret
 check_input endp
 
@@ -1721,6 +1804,38 @@ restore_background proc near
     ret
 restore_background endp
 
+update_animation proc near
+    ; Only animate if moving
+    cmp [is_moving], 1
+    jne @reset_animation
+    
+    ; Update animation frame counter
+    inc [frame_counter]
+    mov al, [frame_delay]
+    cmp [frame_counter], al
+    jl @done
+    
+    ; Time to change frames
+    mov [frame_counter], 0
+    xor al, al              ; AL = 0
+    cmp [current_frame], al
+    je @switch_to_frame1
+    mov [current_frame], 0  ; Toggle to frame 0
+    jmp @done
+    
+@switch_to_frame1:
+    mov [current_frame], 1  ; Toggle to frame 1
+    jmp @done
+    
+@reset_animation:
+    ; Reset to first frame when not moving
+    mov [current_frame], 0
+    mov [frame_counter], 0
+    
+@done:
+    ret
+update_animation endp
+
 
 toggle_pause proc near
     cmp [current_type], 0
@@ -1814,14 +1929,17 @@ game_loop:
     push ax
     
     ; Check for input and update player position
-    ; Note: check_input now calls check_coin_collision after moving
     call check_input
     
-    ; Draw player at new position
+    ; Update animation frames
+    call update_animation
+    
+    ; Draw player at new position with the current animation frame
     call draw_player_improved
     
-    ; Display score (optional - if you implement this)
-    ; call display_score
+    ; Display score (optional)
+    call display_score
+
     
     ; Add delay for game speed
     mov cx, 1
