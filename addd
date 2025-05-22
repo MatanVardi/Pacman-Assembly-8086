@@ -1,0 +1,59 @@
+[33mcommit 36f125b7bb30b7bf5bddb2a2a1612e326edc3090[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Wed May 7 22:21:16 2025 +0300
+
+    Changed animation sprites + added animation
+
+[33mcommit 9e29a988df2aa80ce83550c8c825921df9050b4a[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Wed May 7 21:24:22 2025 +0300
+
+    Added coins + score + animation images
+
+[33mcommit 52c7a00f2c09cf25cee2a1c626f89c87d081e199[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Fri Apr 25 18:11:54 2025 +0300
+
+    Added main menu, pause menu, fixed disappearing
+
+[33mcommit 1d31002e5df18db8d94696992aae03c83cdfaf4c[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Thu Apr 24 16:21:46 2025 +0300
+
+    Fixed disappearing because of XOR
+
+[33mcommit 5d2c102afbe015fc673b669a42cefa70a4260659[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Tue Apr 22 20:55:13 2025 +0300
+
+    Fixed collision + added sprites for animation
+
+[33mcommit b57251761409e7a4f56c1eab15d926f496526e11[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Sun Apr 20 17:16:07 2025 +0300
+
+    Background isn't removed now
+
+[33mcommit 369fc7c7436037d97887eca540c6f81969458ad0[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Sun Apr 20 15:50:41 2025 +0300
+
+    fixed image + maze showing
+
+[33mcommit 7b7c7896a17a5314610f645ff10f72dd8a710f29[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Sat Apr 19 21:36:29 2025 +0300
+
+    Maze with player and collision that needs to be fixed
+
+[33mcommit 447d9bce86f9ce12c1c607dc29ab6b7c91af49f3[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Sat Apr 19 18:14:13 2025 +0300
+
+    Added maze with squares and 2d array
+
+[33mcommit 742f0f18d9bf1a6a5b7c457f3b59fff718eecda4[m
+Author: MatanV <matanvardi1@gmail.com>
+Date:   Fri Apr 18 01:03:35 2025 +0300
+
+    First commit
