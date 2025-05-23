@@ -18,6 +18,7 @@ PAC_RIGHT2_FILE equ 'right2.bmp'
 PAC_DEFAULT_FILE equ 'default.bmp'
 BLINKY_FILE_NAME equ 'blinky.bmp'
 BLINKY_FILE_NAME2 equ 'blinky3.bmp'
+PINKY_FILE_NAME equ 'pinky.bmp'
 PAFILE_NAME_IN equ 'pause.bmp'
 MENU_FILE_IN equ 'menu.bmp'
 
@@ -140,6 +141,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	PacDefaultFileName db PAC_DEFAULT_FILE, 0
 	BlinkyFileName db BLINKY_FILE_NAME, 0
 	BlinkyFileName2 db BLINKY_FILE_NAME2, 0
+	PinkyFileName db PINKY_FILE_NAME, 0
 	PAFileName db PAFILE_NAME_IN, 0
 	MenuFileName db MENU_FILE_IN, 0
 	
@@ -192,7 +194,13 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	blinky_scatter_time dw 20   ; Time in scatter mode
 	blinky_chase_time dw 300     ; Time in chase mode
 	blinky_draw_mode dw 0
-
+	
+	;Pinky (Pink ghost) variables
+	
+	pinky_x_pos dw 110
+	pinky_y_pos dw 80
+	pinky_maze_x db 10
+	pinky_maze_y db 10
 .code
 
 ;-----------------------------------------------------
@@ -542,6 +550,28 @@ draw_blinky proc near
     pop ax
     ret
 draw_blinky endp
+
+
+draw_pinky proc near
+    push ax
+    push bx
+    push dx
+
+	mov ax, [pinky_x_pos]
+	mov [BmpLeft], ax
+	mov ax, [pinky_y_pos]
+    mov [BmpTop], ax
+    mov [BmpWidth], 12
+    mov [BmpHeight], 12
+
+    call OpenShowBmpTransparent
+    
+    pop dx
+    pop bx
+    pop ax
+    ret
+draw_pinky endp
+
 
 
 ;-----------------------------------------------------
@@ -2194,6 +2224,7 @@ pause_menu endp
 ; maze_to_screen_blinky - Converts Blinky's maze coordinates to screen pixels
 ; Uses same conversion as the maze drawing (14x9 cells with 13,5 offset)
 ;-----------------------------------------------------
+
 maze_to_screen_blinky proc near
     push ax
     push bx
@@ -2220,6 +2251,10 @@ maze_to_screen_blinky proc near
     pop ax
     ret
 maze_to_screen_blinky endp
+
+
+
+
 
 
 ;-----------------------------------------------------
@@ -2518,8 +2553,7 @@ set_chase_target proc near
 set_chase_target endp
 
 ;-----------------------------------------------------
-; move_blinky_toward_target - COMPACT FIXED VERSION
-; Better pathfinding in one function, prevents erratic movement
+; move_blinky_toward_target - Improved pathfinding with balanced behavior
 ;-----------------------------------------------------
 move_blinky_toward_target proc near
     push ax
@@ -2720,9 +2754,10 @@ blinky_try_any_direction:
     
 blinky_any_loop:
     cmp si, 5
-    jnge blink_movement_isnt_done    ; No valid moves found
+    jnge blinky_movement_isnt_done    ; No valid moves found
 	jmp blinky_movement_done
-blink_movement_isnt_done:
+blinky_movement_isnt_done:
+
     ; Skip reverse directions
     mov al, [blinky_direction]
     cmp al, 1                   ; Was going up?
