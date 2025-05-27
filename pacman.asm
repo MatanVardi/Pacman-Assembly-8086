@@ -339,12 +339,36 @@ draw_player_improved proc near
     
     ; Boundary checks
     mov ax, [player_x_pos]
-    cmp ax, 5
-    jl @@adjust_x_min
-    cmp ax, 302
-    jg @@adjust_x_max
+	cmp ax, 15
+	je x_ok2
+	mov ax, [player_x_pos]
+	cmp ax, 293
+	je x_ok3
+
     jmp @@x_ok
-    
+
+x_ok2:
+	mov dx, [player_y_pos]
+	cmp dx, 80
+	je actually_wrap_right     ; was `wrap_right`
+	;jmp @@adjust_x_min
+
+actually_wrap_right:
+	mov ax, 285
+	mov [player_x_pos], ax
+	jmp @@x_ok
+
+x_ok3:
+	mov dx, [player_y_pos]
+	cmp dx, 80
+	je actually_wrap_left      ; was `wrap_left`
+	;jmp @@adjust_x_max
+
+actually_wrap_left:
+	mov ax, 30
+	mov [player_x_pos], ax
+	jmp @@x_ok
+	
 @@adjust_x_min:
     mov ax, 5
     mov [player_x_pos], ax
@@ -447,8 +471,6 @@ draw_player_improved proc near
     pop ax
     ret
 draw_player_improved endp
-
-
 
 ;-----------------------------------------------------
 ; draw_rect - Draw a rectangle at (x_pos, y_pos) with color
