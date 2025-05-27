@@ -222,6 +222,19 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	; Inky variables:
 	
 	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	ghost_draw_order db 4, 3, 2, 1  ; Clyde, Inky, Pinky, Blinky
+
+	
 .code
 
 ;-----------------------------------------------------
@@ -769,37 +782,22 @@ draw_coins_col:
     cmp cx, 20
     je skip_coin
     
-    ; Calculate offset in maze_map: row * width + column
+    ; Calculate offset in little_coins_map: row * width + column
     mov ax, bx                  ; AX = row
     xor ah, ah
     mov si, ax                  ; Save row in SI
-    mov al, [maze_width]        ; AL = width
+    mov al, 21                  ; Width of little_coins_map is 21
     mul si                      ; AX = row * width
     add ax, cx                  ; AX = row * width + column
     
-    ; Only place coins in pathways (not walls)
-    mov si, offset maze_map
+    ; Check if coin should be placed (1 in little_coins_map)
+    mov si, offset little_coins_map  ; <-- Changed from maze_map to little_coins_map
     add si, ax
-    mov al, [si]                ; AL = maze value (0 or 1)
+    mov al, [si]                ; AL = coin map value (0 or 1)
     
-    cmp al, 1                   ; Is it a wall?
-    je skip_coin                ; If wall, skip coin
+    cmp al, 0                   ; Is it 0 (no coin)?
+    je skip_coin                ; If 0, skip coin
     
-    ; Define a larger ghost house area to ensure a clear middle space
-    ; Expanded ghost house area: rows 8-12, columns 7-13
-	cmp bx, 7                   ; Check if row >= 8
-	jl not_ghost_house
-	cmp bx, 13                  ; Check if row <= 13
-	jg not_ghost_house
-	cmp cx, 6                   ; Check if column >= 6
-	jl not_ghost_house
-	cmp cx, 14                  ; Check if column <= 14
-	jg not_ghost_house
-		
-    ; We're in the ghost house area, skip this coin
-    jmp skip_coin
-    
-not_ghost_house:
     ; Calculate position for coin drawing - CENTER IT IN THE CELL
     mov ax, [x_pos]
     add ax, 7                   ; Center horizontally (cell width is 14, so +7)
@@ -818,8 +816,7 @@ skip_coin:
     
     ; Next column
     inc cx
-    mov al, [maze_width]
-    cmp cl, al
+    cmp cx, 21                  ; Width of little_coins_map is 21
     jl draw_coins_col
     
     ; Move to next row
@@ -827,8 +824,7 @@ skip_coin:
     
     ; Next row
     inc bx
-    mov al, [maze_height]
-    cmp bl, al
+    cmp bx, 21                  ; Height of little_coins_map is 21
     jl draw_coins_row
     
     pop si
@@ -838,7 +834,6 @@ skip_coin:
     pop ax
     ret
 DrawCoins endp
-
 
 
 ;-----------------------------------------------------
@@ -852,6 +847,7 @@ check_coin_collision proc near
     push cx
     push dx
     push si
+    push di
     
     ; Calculate player's center in grid coordinates
     mov ax, [player_x_pos]
@@ -870,31 +866,31 @@ check_coin_collision proc near
     div bx                      ; AX = player grid Y, DX = remainder
     mov bx, ax                  ; Save grid Y in BX
     
-    ; Check bounds
+    ; Check bounds - make sure we're within the little_coins_map
     cmp cx, 0
     jl no_coin_here
-    cmp cx, 20
+    cmp cx, 20                  ; little_coins_map width is 21 (0-20)
     jge no_coin_here
     cmp bx, 0
     jl no_coin_here
-    cmp bx, 20
+    cmp bx, 20                  ; little_coins_map height is 21 (0-20)
     jge no_coin_here
     
-    ; Calculate index in maze map: row * width + column
+    ; Calculate index in little_coins_map: row * width + column
     mov ax, bx                  ; AX = row
     mov si, ax                  ; Save row in SI
-    mov al, [maze_width]        ; AL = width
+    mov al, 21                  ; Width of little_coins_map is 21
     mul si                      ; AX = row * width
     add ax, cx                  ; AX = row * width + column
     mov si, ax                  ; SI = index
     
-    ; Check if this position is a wall (no coin possible)
-    mov di, offset maze_map
+    ; Check if there should be a coin at this position in little_coins_map
+    mov di, offset little_coins_map
     add di, si
-    mov al, [di]                ; Get maze value
+    mov al, [di]                ; Get coin map value (0 or 1)
     
-    cmp al, 1                   ; Is it a wall?
-    je no_coin_here             ; If wall, exit - no coin possible
+    cmp al, 0                   ; Is it 0 (no coin should be here)?
+    je no_coin_here             ; If 0, exit - no coin should exist here
     
     ; Now check if this coin has already been collected
     mov di, offset coins_collected
@@ -903,23 +899,6 @@ check_coin_collision proc near
     
     cmp al, 1                   ; Already collected?
     je no_coin_here             ; If already collected, exit
-    
-    ; Check ghost house area - no coins there
-    cmp bx, 7                   ; Row >= 7
-    jl check_corners
-    cmp bx, 13                  ; Row <= 13
-    jg check_corners
-    cmp cx, 6                   ; Column >= 6
-    jl check_corners
-    cmp cx, 14                  ; Column <= 14
-    jg check_corners
-    
-    ; In ghost house area - skip
-    jmp no_coin_here
-    
-check_corners:
-    ; Skip coins in corner areas same as in DrawCoins
-    ; (Add any specific corner checks if needed)
     
     ; If we get here, it's a valid coin to collect!
     
@@ -951,6 +930,7 @@ check_corners:
     call display_score
     
 no_coin_here:
+    pop di
     pop si
     pop dx
     pop cx
@@ -1492,8 +1472,6 @@ snap_to_grid proc near
     pop ax
     ret
 snap_to_grid endp
-
-
 
 ;-----------------------------------------------------
 ; check_input - Handles keyboard input and player movement logic
@@ -2290,6 +2268,30 @@ game_over_menu endp
 
 ; Enemies Logic (without drawing):
 
+;-----------------------------------------------------
+; draw_all_ghosts - Draws ghosts in correct order for overlap
+;-----------------------------------------------------
+draw_all_ghosts proc near
+    push ax
+    
+    ; Draw in reverse priority order (bottom to top)
+    ; This ensures correct overlap when ghosts pass through each other
+    
+    ; Draw Clyde first (bottom layer)
+    ; call draw_clyde     ; When you add Clyde
+    
+    ; Draw Inky second
+    ; call draw_inky      ; When you add Inky
+    
+    ; Draw Pinky third
+    call draw_pinky
+    
+    ; Draw Blinky last (top layer)
+    call draw_blinky
+    
+    pop ax
+    ret
+draw_all_ghosts endp
 
 ;-----------------------------------------------------
 ; maze_to_screen_blinky - Converts Blinky's maze coordinates to screen pixels
@@ -3155,6 +3157,7 @@ set_pinky_chase_target proc near
 set_pinky_chase_target endp
 
 
+
 ;-----------------------------------------------------
 ; update_pinky - Main Pinky update procedure
 ;-----------------------------------------------------
@@ -3162,79 +3165,82 @@ update_pinky proc near
     push ax
     push bx
     
-    ; Increment movement counter for speed control
+    ; Speed control - only move when counter reaches delay
     inc byte ptr [pinky_move_counter]
     mov al, [pinky_move_delay]
     cmp [pinky_move_counter], al
-    jge @time_to_move         ; Time to move
-    jmp @skip_pinky_move
+    jl @skip_pinky_move
     
-@time_to_move:
-    ; Restore background at CURRENT position before moving
+    ; Time to move - restore background first
     call restore_pinky_background
     
     ; Reset movement counter
     mov byte ptr [pinky_move_counter], 0
     
-    ; Update mode timer and switch between scatter/chase
+    ; Check if in ghost house
+    cmp byte ptr [pinky_in_ghost_house], 1
+    je @handle_ghost_house
+    
+    ;========== NORMAL AI (Outside Ghost House) ==========
+    ; Update mode timer
     inc word ptr [pinky_mode_timer]
     
-    ; Check if we need to switch modes
+    ; Check current mode
     mov al, [pinky_mode]
-    cmp al, 0                    ; Currently in scatter mode?
-    je @check_scatter_timer2
-    
+    cmp al, 0
+    jne @not_scatter_timer
+	jmp @check_scatter_timer2
+@not_scatter_timer:  
     ; In chase mode - check if time to switch to scatter
     mov ax, [pinky_mode_timer]
-    cmp ax, [pinky_chase_time]
-    jl @move_pinky             ; Continue chasing
+    cmp ax, [pinky_chase_time]    ; 300 cycles
+    jl @set_target
     
     ; Switch to scatter mode
     mov byte ptr [pinky_mode], 0
     mov word ptr [pinky_mode_timer], 0
-    jmp @move_pinky
+    jmp @set_target
     
 @check_scatter_timer2:
-    ; In scatter mode - check if time to switch to chase  
+    ; In scatter mode - check if time to switch to chase
     mov ax, [pinky_mode_timer]
-    cmp ax, [pinky_scatter_time]
-    jl @move_pinky             ; Continue scattering
+    cmp ax, [pinky_scatter_time]   ; 20 cycles
+    jl @set_target
     
     ; Switch to chase mode
     mov byte ptr [pinky_mode], 1
     mov word ptr [pinky_mode_timer], 0
     
-@move_pinky:
-    ; Set target based on current mode
+@set_target:
+    ; Set target based on mode
     mov al, [pinky_mode]
     cmp al, 0
-    je @scatter_mode2
+    je @scatter_target
     
-    ; Chase mode - target 4 tiles ahead of player
+    ; Chase mode - target 4 cells ahead of Pac-Man
     call set_pinky_chase_target
-    jmp @find_best_direction2
+    jmp @move_ghost
     
-@scatter_mode2:
+@scatter_target:
     ; Scatter mode - target top-left corner
-    mov byte ptr [pinky_target_x], 1   ; Left side
-    mov byte ptr [pinky_target_y], 1   ; Top side
+    mov byte ptr [pinky_target_x], 1
+    mov byte ptr [pinky_target_y], 1
+    jmp @move_ghost
     
-@find_best_direction2:
-    ; Use pathfinding to move toward target (similar to Blinky's)
+@handle_ghost_house:
+    ; Don't set any target - ghost house handles its own movement
+    
+@move_ghost:
+    ; Execute movement
     call move_pinky_toward_target
     
-    ; Convert maze coordinates back to screen position
+    ; Convert to screen coordinates
     call maze_to_screen_pinky
     
-    ; Save the background at the NEW position
+    ; Save new background
     call save_pinky_background
     
-    jmp @pinky_update_done
-
-@skip_pinky_move:    
-    ; No movement, do nothing to background
-    
-@pinky_update_done:
+@skip_pinky_move:
     pop bx
     pop ax
     ret
@@ -3251,211 +3257,121 @@ move_pinky_toward_target proc near
     push dx
     push si
     
-    ; FIRST: Check if in ghost house
-    cmp byte ptr [pinky_in_ghost_house], 0
-    je before_normal_movement_start    ; Skip ghost house logic if already outside
-    
-    ; GHOST HOUSE EXIT LOGIC
-    
-    ; Increment exit timer
-    inc word ptr [pinky_exit_timer]
-    
-    ; Check if it's time to exit (50 = quicker for testing)
-    cmp word ptr [pinky_exit_timer], 50
-    jl stay_in_house
-    
-    ; EXIT SEQUENCE - Simplified and Direct
-    
-    ; 1. Check if at door position
-    mov al, [ghost_house_door_x]
-    cmp byte ptr [pinky_maze_x], al
-    jne move_to_door_x
-    
-    ; X is aligned, check Y
-    mov al, [ghost_house_door_y]
-    cmp byte ptr [pinky_maze_y], al
-    jne move_to_door_y
-    
-    ; At door position - exit ghost house
-    mov byte ptr [pinky_in_ghost_house], 0  ; Mark as outside
-    mov byte ptr [pinky_direction], 1       ; Set direction up
-    dec byte ptr [pinky_maze_y]             ; Move up immediately
-    jmp exit_proc                           ; Skip normal movement
-
-before_normal_movement_start:
-	jmp normal_movement_start
-
- 
-move_to_door_x:
-    ; Move toward door X coordinate
-    mov al, [ghost_house_door_x]
-    cmp byte ptr [pinky_maze_x], al
-    jl move_right
-    jg move_left
-    
-move_right:
-    ; Move right toward door
-    mov byte ptr [pinky_direction], 4
-    inc byte ptr [pinky_maze_x]
-    jmp exit_proc
-    
-move_left:
-    ; Move left toward door
-    mov byte ptr [pinky_direction], 3
-    dec byte ptr [pinky_maze_x]
-    jmp exit_proc
-    
-move_to_door_y:
-    ; Already aligned on X, move up to door
-    mov byte ptr [pinky_direction], 1
-    dec byte ptr [pinky_maze_y]
-    jmp exit_proc
-    
-stay_in_house:
-    ; Simple bounce left-right until exit timer expires
-    cmp byte ptr [pinky_direction], 3  ; Currently moving left?
-    je try_moving_left
-    
-    ; Try moving right
-    cmp byte ptr [pinky_maze_x], 11    ; Right boundary?
-    jge switch_to_left
-    
-    ; Move right
-    mov byte ptr [pinky_direction], 4
-    inc byte ptr [pinky_maze_x]
-    jmp exit_proc
-    
-try_moving_left:
-    ; Try moving left
-    cmp byte ptr [pinky_maze_x], 9     ; Left boundary?
-    jle switch_to_right
-    
-    ; Move left
-    dec byte ptr [pinky_maze_x]
-    jmp exit_proc
-    
-switch_to_left:
-    ; Switch to left direction
-    mov byte ptr [pinky_direction], 3
-    dec byte ptr [pinky_maze_x]
-    jmp exit_proc
-    
-switch_to_right:
-    ; Switch to right direction
-    mov byte ptr [pinky_direction], 4
-    inc byte ptr [pinky_maze_x]
-    jmp exit_proc
-    
-    ; NORMAL MOVEMENT LOGIC - your original code
+    ; Check if in ghost house - use inverted logic for short jump
+    cmp byte ptr [pinky_in_ghost_house], 1
+    jne not_ghost_house_handler      ; Jump to ghost house logic
+	jmp ghost_house_handler
+not_ghost_house_handler:
+	
+    ; ===================================================================
+    ; NORMAL MOVEMENT LOGIC (Outside cage - uses proper AI targeting)
+    ; ===================================================================
 normal_movement_start:
-    ; Get current position for normal movement
+    ; Get current position
     mov dl, [pinky_maze_x]      ; Current X position
     mov dh, [pinky_maze_y]      ; Current Y position
     mov cl, [pinky_direction]   ; Current direction
     
-    ; STEP 1: Try continuing in current direction
+    ; STEP 1: Try continuing in current direction first
+try_continue_current:
     mov al, dl                  ; Current X
     mov bh, dh                  ; Current Y
     
     ; Modify position based on current direction
     cmp cl, 1                   ; Going up?
-    jne check_down
+    jne check_current_down
     dec bh                      ; Try Y-1
-    jmp test_current
+    jmp test_current_direction
     
-check_down:
+check_current_down:
     cmp cl, 2                   ; Going down?
-    jne check_left
+    jne check_current_left
     inc bh                      ; Try Y+1
-    jmp test_current
+    jmp test_current_direction
     
-check_left:
+check_current_left:
     cmp cl, 3                   ; Going left?
-    jne check_right
+    jne check_current_right
     dec al                      ; Try X-1
-    jmp test_current
+    jmp test_current_direction
     
-check_right:
+check_current_right:
     cmp cl, 4                   ; Going right?
-    jne choose_direction
+    jne choose_new_direction
     inc al                      ; Try X+1
     
-test_current:
+test_current_direction:
     ; Test if current direction is still valid
     call is_valid_maze_position
     cmp cl, 1
-    jne choose_direction      ; Blocked, need new direction
+    jne choose_new_direction    ; Blocked, need new direction
     
-    ; Can continue current direction - update position
+    ; Can continue current direction - execute the move
+execute_current_direction:
     mov al, [pinky_direction]
     cmp al, 1                   ; Was up?
-    jne not_up
+    jne continue_not_up
     dec byte ptr [pinky_maze_y]
-    jmp exit_proc
+    jmp finalize_movement
     
-not_up:
+continue_not_up:
     cmp al, 2                   ; Was down?
-    jne not_down
+    jne continue_not_down
     inc byte ptr [pinky_maze_y]
-    jmp exit_proc
+    jmp finalize_movement
     
-not_down:
+continue_not_down:
     cmp al, 3                   ; Was left?
-    jne not_left
+    jne continue_not_left
     dec byte ptr [pinky_maze_x]
-    jmp exit_proc
+    jmp finalize_movement
     
-not_left:
+continue_not_left:
     ; Must be right
     inc byte ptr [pinky_maze_x]
-    jmp exit_proc
-    
-choose_direction:
+    jmp finalize_movement
+
     ; STEP 2: Choose new direction toward target
+choose_new_direction:
     ; Calculate differences to target
     mov al, [pinky_target_x]
     sub al, dl                  ; AL = signed X difference
     mov bl, al                  ; Save signed X diff
-    jns x_positive
+    jns x_diff_positive
     neg al                      ; Make absolute
-x_positive:
+x_diff_positive:
     
     mov ah, [pinky_target_y]
     sub ah, dh                  ; AH = signed Y difference
     mov bh, ah                  ; Save signed Y diff
-    jns y_positive
+    jns y_diff_positive
     neg ah                      ; Make absolute
-y_positive:
+y_diff_positive:
     
-    ; Choose primary movement axis
+    ; Choose primary movement axis (larger difference first)
     cmp al, ah                  ; Compare |x_diff| with |y_diff|
-    jb try_vertical_first       ; |x_diff| < |y_diff|
-    je choose_random            ; Equal differences
+    jb try_vertical_movement    ; |x_diff| < |y_diff|
+    je choose_random_axis       ; Equal differences
     
-    ; Try horizontal first (larger X difference)
+    ; Try horizontal movement first
+try_horizontal_movement:
     cmp bl, 0
-    jl try_left                 ; Target is left
-    jg try_right                ; Target is right
-    jmp try_vertical_first      ; Same X, try vertical
+    jl attempt_left_move        ; Target is left
+    jg attempt_right_move       ; Target is right
+    jmp try_vertical_movement   ; Same X, try vertical
     
-choose_random:
-    ; Use system timer for randomness
+choose_random_axis:
+    ; Use system timer for pseudo-randomness
     mov ah, 0
     int 1Ah                     ; Get system time
     test dl, 1                  ; Test lowest bit
-    jz try_horizontal           ; Even = horizontal
-    jmp try_vertical_first      ; Odd = vertical
+    jz try_horizontal_movement  ; Even = horizontal first
+    jmp try_vertical_movement   ; Odd = vertical first
     
-try_horizontal:
-    cmp bl, 0
-    jl try_left                 ; Target is left
-    jg try_right                ; Target is right
-    jmp try_vertical_first      ; Same X, try vertical
-    
-try_right:
-    ; Don't reverse from left
-    cmp cl, 3                   ; Was going left?
-    je try_left                 ; Don't reverse
+attempt_right_move:
+    ; Don't reverse from left to right
+    cmp [pinky_direction], 3    ; Was going left?
+    je attempt_left_move        ; Skip reverse direction
     
     ; Test moving right
     mov al, dl
@@ -3463,17 +3379,17 @@ try_right:
     mov bh, dh
     call is_valid_maze_position
     cmp cl, 1
-    jne try_left                ; Can't go right
+    jne attempt_left_move       ; Can't go right, try left
     
-    ; Move right
+    ; Execute right move
     mov byte ptr [pinky_direction], 4
     inc byte ptr [pinky_maze_x]
-    jmp exit_proc
+    jmp finalize_movement
     
-try_left:
-    ; Don't reverse from right
+attempt_left_move:
+    ; Don't reverse from right to left
     cmp [pinky_direction], 4    ; Was going right?
-    je try_vertical_first       ; Don't reverse
+    je try_vertical_movement    ; Skip reverse direction
     
     ; Test moving left
     mov al, dl
@@ -3481,24 +3397,24 @@ try_left:
     mov bh, dh
     call is_valid_maze_position
     cmp cl, 1
-    jne try_vertical_first      ; Can't go left
+    jne try_vertical_movement   ; Can't go left, try vertical
     
-    ; Move left
+    ; Execute left move
     mov byte ptr [pinky_direction], 3
     dec byte ptr [pinky_maze_x]
-    jmp exit_proc
+    jmp finalize_movement
     
-try_vertical_first:
-    ; Try vertical movement
-    cmp bh, 0
-    jl try_up                   ; Target is up
-    jg try_down                 ; Target is down
-    jmp try_any                 ; Same Y, try any
+try_vertical_movement:
+    ; Try vertical movement based on target
+    cmp bh, 0                   ; Check saved signed Y difference
+    jl attempt_up_move          ; Target is up
+    jg attempt_down_move        ; Target is down
+    jmp emergency_any_direction ; Same Y, try any direction
     
-try_down:
-    ; Don't reverse from up
-    cmp cl, 1                   ; Was going up?
-    je try_up                   ; Don't reverse
+attempt_down_move:
+    ; Don't reverse from up to down
+    cmp [pinky_direction], 1    ; Was going up?
+    je attempt_up_move          ; Skip reverse direction
     
     ; Test moving down
     mov al, dl
@@ -3506,17 +3422,17 @@ try_down:
     inc bh                      ; Try Y+1
     call is_valid_maze_position
     cmp cl, 1
-    jne try_up                  ; Can't go down
+    jne attempt_up_move         ; Can't go down, try up
     
-    ; Move down
+    ; Execute down move
     mov byte ptr [pinky_direction], 2
     inc byte ptr [pinky_maze_y]
-    jmp exit_proc
+    jmp finalize_movement
     
-try_up:
-    ; Don't reverse from down
+attempt_up_move:
+    ; Don't reverse from down to up
     cmp [pinky_direction], 2    ; Was going down?
-    je try_any                  ; Don't reverse
+    je emergency_any_direction  ; Skip reverse direction
     
     ; Test moving up
     mov al, dl
@@ -3524,101 +3440,202 @@ try_up:
     dec bh                      ; Try Y-1
     call is_valid_maze_position
     cmp cl, 1
-    jne try_any                 ; Can't go up
+    jne emergency_any_direction ; Can't go up, try any direction
     
-    ; Move up
+    ; Execute up move
     mov byte ptr [pinky_direction], 1
     dec byte ptr [pinky_maze_y]
-    jmp exit_proc
+    jmp finalize_movement
     
-try_any:
-    ; Try any valid direction
-    ; First try up if not coming from down
+emergency_any_direction:
+    ; Last resort - try any valid direction except reverse
+    ; Try directions in order: up, down, left, right
+    
+    ; Try up (if not reverse)
     cmp [pinky_direction], 2    ; Coming from down?
-    je skip_try_up              ; Skip opposite direction
-    
+    je try_emergency_down       ; Skip up
     mov al, dl
     mov bh, dh
-    dec bh                      ; Y-1 (up)
+    dec bh
     call is_valid_maze_position
     cmp cl, 1
-    jne skip_try_up
-    
-    ; Can move up
+    jne try_emergency_down
     mov byte ptr [pinky_direction], 1
     dec byte ptr [pinky_maze_y]
-    jmp exit_proc
+    jmp finalize_movement
     
-skip_try_up:
-    ; Try down if not coming from up
+try_emergency_down:
+    ; Try down (if not reverse)
     cmp [pinky_direction], 1    ; Coming from up?
-    je skip_try_down            ; Skip opposite direction
-    
+    je try_emergency_left       ; Skip down
     mov al, dl
     mov bh, dh
-    inc bh                      ; Y+1 (down)
+    inc bh
     call is_valid_maze_position
     cmp cl, 1
-    jne skip_try_down
-    
-    ; Can move down
+    jne try_emergency_left
     mov byte ptr [pinky_direction], 2
     inc byte ptr [pinky_maze_y]
-    jmp exit_proc
+    jmp finalize_movement
     
-skip_try_down:
-    ; Try left if not coming from right
+try_emergency_left:
+    ; Try left (if not reverse)
     cmp [pinky_direction], 4    ; Coming from right?
-    je skip_try_left            ; Skip opposite direction
-    
+    je try_emergency_right      ; Skip left
     mov al, dl
-    dec al                      ; X-1 (left)
+    dec al
     mov bh, dh
     call is_valid_maze_position
     cmp cl, 1
-    jne skip_try_left
-    
-    ; Can move left
+    jne try_emergency_right
     mov byte ptr [pinky_direction], 3
     dec byte ptr [pinky_maze_x]
-    jmp exit_proc
+    jmp finalize_movement
     
-skip_try_left:
-    ; Try right if not coming from left
+try_emergency_right:
+    ; Try right (if not reverse)
     cmp [pinky_direction], 3    ; Coming from left?
-    je no_valid_moves           ; Skip opposite direction
-    
+    je completely_stuck         ; Skip right
     mov al, dl
-    inc al                      ; X+1 (right)
+    inc al
     mov bh, dh
     call is_valid_maze_position
     cmp cl, 1
-    jne no_valid_moves
-    
-    ; Can move right
+    jne completely_stuck
     mov byte ptr [pinky_direction], 4
     inc byte ptr [pinky_maze_x]
-    jmp exit_proc
+    jmp finalize_movement
     
-no_valid_moves:
-    ; No valid moves found, stay in place
+completely_stuck:
+    ; Should never happen in a proper maze - just stay put
+    jmp finalize_movement
+
+    ; ===================================================================
+    ; GHOST HOUSE LOGIC (Cage exit behavior - no AI targeting)
+    ; ===================================================================
+ghost_house_handler:
+    ; Increment exit timer
+    inc word ptr [pinky_exit_timer]
     
-exit_proc:
-    ; Check for maze wrap-around (tunnel handling)
+    ; Check if it's time to exit
+    cmp word ptr [pinky_exit_timer], 50
+    jl house_bouncing_behavior
+    
+ghost_house_exit_sequence:
+    ; Get door position
+    mov dl, [ghost_house_door_x]  ; DL = door X (10)
+    mov dh, [ghost_house_door_y]  ; DH = door Y (7)
+    
+    ; Current position
+    mov al, [pinky_maze_x]        ; AL = current X
+    mov ah, [pinky_maze_y]        ; AH = current Y
+    
+    ; Priority 1: Align X position with door first
+    cmp al, dl                    ; Compare current X with door X
+    je check_y_alignment          ; X is correct, check Y
+    
+    ; Need to move horizontally to align with door
+    cmp al, dl
+    jl move_right_to_door         ; Current X < door X, move right
+    
+move_left_to_door:
+    ; Current X > door X, move left
+    mov byte ptr [pinky_direction], 3  ; Set direction left
+    dec byte ptr [pinky_maze_x]        ; Move left
+    jmp finalize_movement
+    
+move_right_to_door:
+    mov byte ptr [pinky_direction], 4  ; Set direction right
+    inc byte ptr [pinky_maze_x]        ; Move right
+    jmp finalize_movement
+    
+check_y_alignment:
+    ; X is aligned with door, now check Y position
+    cmp ah, dh                    ; Compare current Y with door Y
+    je execute_ghost_house_exit   ; At door position - exit!
+    
+    ; Need to move vertically to door Y
+    cmp ah, dh
+    jg move_up_to_door           ; Current Y > door Y, move up
+    
+move_down_to_door:
+    ; Current Y < door Y, move down (unusual but handle it)
+    mov byte ptr [pinky_direction], 2  ; Set direction down
+    inc byte ptr [pinky_maze_y]        ; Move down
+    jmp finalize_movement
+    
+move_up_to_door:
+    mov byte ptr [pinky_direction], 1  ; Set direction up
+    dec byte ptr [pinky_maze_y]        ; Move up
+    jmp finalize_movement
+    
+execute_ghost_house_exit:
+    ; At door position - exit the ghost house!
+    mov byte ptr [pinky_in_ghost_house], 0  ; Mark as outside
+    mov byte ptr [pinky_direction], 1       ; Continue moving up
+    dec byte ptr [pinky_maze_y]             ; Move up immediately
+    
+    ; Initialize normal AI behavior
+    mov byte ptr [pinky_mode], 0            ; Start in scatter mode
+    mov word ptr [pinky_mode_timer], 0      ; Reset mode timer
+    
+    jmp finalize_movement
+    
+house_bouncing_behavior:
+    ; Simple left-right bouncing until ready to exit
+    
+    ; Check current direction and boundaries
+    cmp byte ptr [pinky_direction], 4  ; Moving right?
+    je check_right_house_boundary
+    
+    ; Assume moving left, check left boundary
+    cmp byte ptr [pinky_maze_x], 9     ; At left boundary of ghost house?
+    jle switch_direction_to_right
+    
+    ; Continue moving left
+    dec byte ptr [pinky_maze_x]
+    jmp finalize_movement
+    
+check_right_house_boundary:
+    ; Moving right, check right boundary
+    cmp byte ptr [pinky_maze_x], 11    ; At right boundary of ghost house?
+    jge switch_direction_to_left
+    
+    ; Continue moving right
+    inc byte ptr [pinky_maze_x]
+    jmp finalize_movement
+    
+switch_direction_to_left:
+    mov byte ptr [pinky_direction], 3  ; Switch to left
+    dec byte ptr [pinky_maze_x]        ; Move left
+    jmp finalize_movement
+    
+switch_direction_to_right:
+    mov byte ptr [pinky_direction], 4  ; Switch to right
+    inc byte ptr [pinky_maze_x]        ; Move right
+    jmp finalize_movement
+
+    ; ===================================================================
+    ; FINALIZATION (Single exit point for all paths)
+    ; ===================================================================
+finalize_movement:
+    ; Handle maze wrap-around (horizontal tunnels)
+check_left_tunnel:
     cmp byte ptr [pinky_maze_x], 0
     jne check_right_tunnel
-    mov byte ptr [pinky_maze_x], 20   ; Wrap to right
-    jmp proc_end
+    mov byte ptr [pinky_maze_x], 20   ; Wrap to right side
+    jmp update_screen_position
     
 check_right_tunnel:
     cmp byte ptr [pinky_maze_x], 20
-    jne proc_end
-    mov byte ptr [pinky_maze_x], 0    ; Wrap to left
+    jne update_screen_position
+    mov byte ptr [pinky_maze_x], 0    ; Wrap to left side
     
-proc_end:
-    ; Update screen coordinates
+update_screen_position:
+    ; Convert maze coordinates to screen coordinates
     call maze_to_screen_pinky
     
+    ; Restore registers and exit
     pop si
     pop dx
     pop cx
@@ -3626,7 +3643,6 @@ proc_end:
     pop ax
     ret
 move_pinky_toward_target endp
-
 
 ;-----------------------------------------------------
 ; check_player_pinky_collision - Checks for collision with player
@@ -3776,8 +3792,7 @@ game_loop:
     
     call draw_player_improved
     
-    call draw_blinky
-	call draw_pinky
+    call draw_all_ghosts
     
     call display_score
     
