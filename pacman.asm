@@ -1992,7 +1992,7 @@ handle_info_page proc near
         cmp al, 1Bh       ; ESC key (ASCII)
         je handle_menu
         
-        cmp ah, 3Bh       ; F1 key (scan code)
+        cmp al, "F"       ; F1 key (scan code)
         je handle_tutorial
         
         jmp info_wait     ; Keep waiting
@@ -2018,7 +2018,7 @@ handle_tutorial_page proc near
         cmp al, 1Bh       
         je handle_menu2
         
-        cmp ah, 3Bh       ; F1 key (scan code)
+        cmp al, "F"       ; F1 key (scan code)
 		je handle_information
 		
         jmp tutorial_wait     ; Invalid key, keep waiting
