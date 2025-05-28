@@ -2368,24 +2368,21 @@ game_over_menu endp
 
 
 
-;-----------------------------------------------------
-; draw_all_ghosts - Draws ghosts in correct order for overlap
-;-----------------------------------------------------
 draw_all_ghosts proc near
     push ax
     push bx
     
-    ; Only draw ghosts every other frame
-    ; No overlap - draw all ghosts normally
-    call draw_inky      ; If added
-    call draw_pinky
-    call draw_blinky
+    ; Draw all ghosts in z-order (furthest to closest)
+    call draw_clyde      ; Draw Clyde first (furthest)
+    call draw_inky       ; Draw Inky next
+    call draw_pinky      ; Draw Pinky next
+    call draw_blinky     ; Draw Blinky last (closest)
     
-@skip_ghost_drawing:
     pop bx
     pop ax
     ret
 draw_all_ghosts endp
+
 
 
 
@@ -4338,9 +4335,11 @@ check_player_inky_collision proc near
 check_player_inky_collision endp
 
 
+
 ;-----------------------------------------------------
-; set_clyde_chase_target - Implements Clyde's unique "shy" behavior
-; Targets player when far away, targets scatter position when close
+; set_clyde_chase_target - Sets Clyde's target based on distance from Pac-Man
+; If > 8 tiles away: targets Pac-Man directly
+; If <= 8 tiles away: retreats to scatter corner (bottom-left)
 ;-----------------------------------------------------
 set_clyde_chase_target proc near
     push ax
@@ -4348,7 +4347,7 @@ set_clyde_chase_target proc near
     push cx
     push dx
     
-    ; Get player's maze position
+    ; Get Pac-Man's maze position
     mov ax, [player_x_pos]
     add ax, 6               ; Center of player sprite
     sub ax, 13              ; Subtract maze offset
@@ -4365,35 +4364,41 @@ set_clyde_chase_target proc near
     div bx                  ; AX = player maze Y
     mov ch, al              ; CH = player maze Y
     
-    ; Calculate Manhattan distance to player
-    ; |player_x - clyde_x| + |player_y - clyde_y|
-    mov al, cl
-    sub al, [clyde_maze_x]
-    jns @x_diff_positive
-    neg al
-@x_diff_positive:
-    mov bl, al              ; BL = |player_x - clyde_x|
+    ; Calculate distance to Pac-Man
+    ; Distance = sqrt((x2-x1)^2 + (y2-y1)^2)
+    ; We'll use Manhattan distance for simplicity
     
-    mov al, ch
-    sub al, [clyde_maze_y]
-    jns @y_diff_positive
-    neg al
-@y_diff_positive:
-    add bl, al              ; BL = |player_x - clyde_x| + |player_y - clyde_y|
+    ; Calculate X difference
+    mov al, cl              ; Pac-Man X
+    sub al, [clyde_maze_x]  ; Subtract Clyde X
+    jns @x_positive
+    neg al                  ; Make positive
+@x_positive:
+    mov bl, al              ; BL = |x_diff|
     
-    ; If distance >= 8 tiles, target player directly
-    cmp bl, 8
-    jl @target_scatter
+    ; Calculate Y difference
+    mov al, ch              ; Pac-Man Y
+    sub al, [clyde_maze_y]  ; Subtract Clyde Y
+    jns @y_positive
+    neg al                  ; Make positive
+@y_positive:
     
-    ; Target player directly
-    mov [clyde_target_x], cl
-    mov [clyde_target_y], ch
-    jmp @target_set
+    ; Add X and Y differences for Manhattan distance
+    add al, bl              ; AL = |x_diff| + |y_diff|
     
-@target_scatter:
-    ; When close to player, run away to scatter position (bottom-left)
+    ; Check if distance > 8
+    cmp al, 8
+    jg @target_pacman
+    
+    ; Too close! Retreat to scatter corner (bottom-left)
     mov byte ptr [clyde_target_x], 0
     mov byte ptr [clyde_target_y], 20
+    jmp @target_set
+    
+@target_pacman:
+    ; Far enough away, target Pac-Man directly
+    mov [clyde_target_x], cl
+    mov [clyde_target_y], ch
     
 @target_set:
     pop dx
@@ -4403,9 +4408,547 @@ set_clyde_chase_target proc near
     ret
 set_clyde_chase_target endp
 
+;-----------------------------------------------------
+; update_clyde - Main Clyde update procedure
+;-----------------------------------------------------
+update_clyde proc near
+    push ax
+    push bx
+    
+    ; Speed control - only move when counter reaches delay
+    inc byte ptr [clyde_move_counter]
+    mov al, [clyde_move_delay]
+    cmp [clyde_move_counter], al
+    jl @skip_clyde_move
+    
+    ; Time to move - restore background first
+    call restore_clyde_background
+    
+    ; Reset movement counter
+    mov byte ptr [clyde_move_counter], 0
+    
+    ; Check if in ghost house
+    cmp byte ptr [clyde_in_ghost_house], 1
+    je @handle_ghost_house2
+    
+    ; Update mode timer and switch between scatter/chase
+    inc word ptr [clyde_mode_timer]
+    
+    ; Check if we need to switch modes
+    mov al, [clyde_mode]
+    cmp al, 0                    ; Currently in scatter mode?
+    je @check_clyde_scatter_timer
+    
+    ; In chase mode - check if time to switch to scatter
+    mov ax, [clyde_mode_timer]
+    cmp ax, [clyde_chase_time]
+    jl @set_clyde_target
+    
+    ; Switch to scatter mode
+    mov byte ptr [clyde_mode], 0
+    mov word ptr [clyde_mode_timer], 0
+    jmp @set_clyde_target
+    
+@check_clyde_scatter_timer:
+    ; In scatter mode - check if time to switch to chase  
+    mov ax, [clyde_mode_timer]
+    cmp ax, [clyde_scatter_time]
+    jl @set_clyde_target
+    
+    ; Switch to chase mode
+    mov byte ptr [clyde_mode], 1
+    mov word ptr [clyde_mode_timer], 0
+    
+@set_clyde_target:
+    ; Set target based on current mode
+    mov al, [clyde_mode]
+    cmp al, 0
+    je @clyde_scatter_target
+    
+    ; Chase mode - use Clyde's special targeting
+    call set_clyde_chase_target
+    jmp @move_clyde
+    
+@clyde_scatter_target:
+    ; Scatter mode - target bottom-left corner
+    mov byte ptr [clyde_target_x], 0
+    mov byte ptr [clyde_target_y], 20
+    
+@move_clyde:
+    ; Execute movement
+    call move_clyde_toward_target
+    
+    ; Convert to screen coordinates
+    call maze_to_screen_clyde
+    
+    ; Save new background
+    call save_clyde_background
+    
+    jmp @clyde_update_done
 
+@handle_ghost_house2:
+    ; Handle ghost house exit
+    call exit_ghost_house_clyde
+    
+    ; Convert to screen coordinates
+    call maze_to_screen_clyde
+    
+    ; Save new background
+    call save_clyde_background
+    
+@skip_clyde_move:    
+    ; No movement, do nothing to background
+    
+@clyde_update_done:
+    pop bx
+    pop ax
+    ret
+update_clyde endp
 
+;-----------------------------------------------------
+; move_clyde_toward_target - Movement algorithm for Clyde
+;-----------------------------------------------------
+move_clyde_toward_target proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    
+    ; Get current position
+    mov dl, [clyde_maze_x]      ; Current X position
+    mov dh, [clyde_maze_y]      ; Current Y position
+    mov cl, [clyde_direction]   ; Current direction
+    
+    ; STEP 1: Try continuing in current direction
+    mov al, dl                  ; Current X
+    mov bh, dh                  ; Current Y
+    
+    ; Modify position based on current direction
+    cmp cl, 1                   ; Going up?
+    jne @clyde_check_down
+    dec bh                      ; Try Y-1
+    jmp @clyde_test_direction
+    
+@clyde_check_down:
+    cmp cl, 2                   ; Going down?
+    jne @clyde_check_left
+    inc bh                      ; Try Y+1
+    jmp @clyde_test_direction
+    
+@clyde_check_left:
+    cmp cl, 3                   ; Going left?
+    jne @clyde_check_right
+    dec al                      ; Try X-1
+    jmp @clyde_test_direction
+    
+@clyde_check_right:
+    cmp cl, 4                   ; Going right?
+    jne @clyde_choose_direction
+    inc al                      ; Try X+1
+    
+@clyde_test_direction:
+    ; Test if current direction is still valid (no wall)
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @clyde_choose_direction  ; Blocked by wall, need new direction
+    
+    ; Can continue current direction - update position
+    mov al, [clyde_direction]
+    cmp al, 1                   ; Was up?
+    jne @clyde_continue_not_up
+    dec byte ptr [clyde_maze_y]
+    jmp @clyde_tunnel_check
+    
+@clyde_continue_not_up:
+    cmp al, 2                   ; Was down?
+    jne @clyde_continue_not_down
+    inc byte ptr [clyde_maze_y]
+    jmp @clyde_tunnel_check
+    
+@clyde_continue_not_down:
+    cmp al, 3                   ; Was left?
+    jne @clyde_continue_not_left
+    dec byte ptr [clyde_maze_x]
+    jmp @clyde_tunnel_check
+    
+@clyde_continue_not_left:
+    ; Must be right
+    inc byte ptr [clyde_maze_x]
+    jmp @clyde_tunnel_check
+    
+@clyde_choose_direction:
+    ; Calculate differences to target
+    mov al, [clyde_target_x]
+    sub al, dl                  ; AL = signed X difference
+    mov bl, al                  ; Save signed X diff
+    jns @clyde_x_pos
+    neg al                      ; Make absolute
+@clyde_x_pos:
+    
+    mov ah, [clyde_target_y]
+    sub ah, dh                  ; AH = signed Y difference
+    mov bh, ah                  ; Save signed Y diff
+    jns @clyde_y_pos
+    neg ah                      ; Make absolute
+@clyde_y_pos:
+    
+    ; Choose primary movement axis
+    cmp al, ah                  ; Compare |x_diff| with |y_diff|
+    jb @clyde_try_vertical      ; |x_diff| < |y_diff|
+    je @clyde_choose_random     ; Equal differences
+    
+    ; Try horizontal first (larger X difference)
+    cmp bl, 0
+    jl @clyde_try_left          ; Target is left
+    jg @clyde_try_right         ; Target is right
+    jmp @clyde_try_vertical     ; Same X, try vertical
+    
+@clyde_choose_random:
+    ; Use system timer for randomness
+    mov ah, 0
+    int 1Ah                     ; Get system time
+    test dl, 1                  ; Test lowest bit
+    jz @clyde_try_horizontal    ; Even = horizontal
+    jmp @clyde_try_vertical     ; Odd = vertical
+    
+@clyde_try_horizontal:
+    cmp bl, 0
+    jl @clyde_try_left          ; Target is left
+    jg @clyde_try_right         ; Target is right
+    jmp @clyde_try_vertical     ; Same X, try vertical
+    
+@clyde_try_right:
+    ; Don't reverse from left
+    cmp cl, 3                   ; Was going left?
+    je @clyde_try_left          ; Don't reverse
+    
+    ; Test moving right
+    mov al, dl
+    inc al                      ; Try X+1
+    mov bh, dh
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @clyde_try_left         ; Can't go right due to wall
+    
+    ; Move right
+    mov byte ptr [clyde_direction], 4
+    inc byte ptr [clyde_maze_x]
+    jmp @clyde_tunnel_check
+    
+@clyde_try_left:
+    ; Don't reverse from right
+    cmp cl, 4                   ; Was going right?
+    je @clyde_try_vertical      ; Don't reverse
+    
+    ; Test moving left
+    mov al, dl
+    dec al                      ; Try X-1
+    mov bh, dh
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @clyde_try_vertical     ; Can't go left due to wall
+    
+    ; Move left
+    mov byte ptr [clyde_direction], 3
+    dec byte ptr [clyde_maze_x]
+    jmp @clyde_tunnel_check
+    
+@clyde_try_vertical:
+    ; Try vertical movement
+    cmp bh, 0
+    jl @clyde_try_up            ; Target is up
+    jg @clyde_try_down          ; Target is down
+    jmp @clyde_try_any          ; Same Y, try any
+    
+@clyde_try_down:
+    ; Don't reverse from up
+    cmp cl, 1                   ; Was going up?
+    je @clyde_try_up            ; Don't reverse
+    
+    ; Test moving down
+    mov al, dl
+    mov bh, dh
+    inc bh                      ; Try Y+1
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @clyde_try_up           ; Can't go down due to wall
+    
+    ; Move down
+    mov byte ptr [clyde_direction], 2
+    inc byte ptr [clyde_maze_y]
+    jmp @clyde_tunnel_check
+    
+@clyde_try_up:
+    ; Don't reverse from down
+    cmp cl, 2                   ; Was going down?
+    je @clyde_try_any           ; Don't reverse
+    
+    ; Test moving up
+    mov al, dl
+    mov bh, dh
+    dec bh                      ; Try Y-1
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @clyde_try_any          ; Can't go up due to wall
+    
+    ; Move up
+    mov byte ptr [clyde_direction], 1
+    dec byte ptr [clyde_maze_y]
+    jmp @clyde_tunnel_check
+    
+@clyde_try_any:
+    ; Try any valid direction (except reverse)
+    mov si, 1                   ; Try directions 1,2,3,4
+    
+@clyde_any_loop:
+    cmp si, 5
+    jge @before_clyde_no_valid_moves   ; No valid moves found
+    
+    ; Skip reverse directions
+    mov al, [clyde_direction]
+    cmp al, 1                   ; Was going up?
+    jne @clyde_not_up_reverse
+    cmp si, 2                   ; Trying down?
+    je @clyde_next_any          ; Skip reverse
+@clyde_not_up_reverse:
+    cmp al, 2                   ; Was going down?
+    jne @clyde_not_down_reverse
+    cmp si, 1                   ; Trying up?
+    je @clyde_next_any          ; Skip reverse
+@clyde_not_down_reverse:
+    cmp al, 3                   ; Was going left?
+    jne @clyde_not_left_reverse
+    cmp si, 4                   ; Trying right?
+    je @clyde_next_any          ; Skip reverse
+@clyde_not_left_reverse:
+    cmp al, 4                   ; Was going right?
+    jne @clyde_test_any
+    cmp si, 3                   ; Trying left?
+    je @clyde_next_any          ; Skip reverse
+    
+@clyde_test_any:
+    ; Test direction SI
+    mov al, dl
+    mov bh, dh
+    
+    cmp si, 1                   ; Up?
+    jne @clyde_test_down_any
+    dec bh
+    jmp @clyde_check_any_valid
+    
+@clyde_test_down_any:
+    cmp si, 2                   ; Down?
+    jne @clyde_test_left_any
+    inc bh
+    jmp @clyde_check_any_valid
+    
+@clyde_test_left_any:
+    cmp si, 3                   ; Left?
+    jne @clyde_test_right_any
+    dec al
+    jmp @clyde_check_any_valid
+@before_clyde_no_valid_moves:
+	jmp @clyde_no_valid_moves
+@clyde_test_right_any:
+    ; Must be right
+    inc al
+    
+@clyde_check_any_valid:
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @clyde_next_any         ; Invalid
+    
+    ; Valid direction found - update position
+    mov bx, si
+    mov [clyde_direction], bl
+    
+    cmp si, 1                   ; Up?
+    jne @clyde_any_not_up
+    dec byte ptr [clyde_maze_y]
+    jmp @clyde_tunnel_check
+    
+@clyde_any_not_up:
+    cmp si, 2                   ; Down?
+    jne @clyde_any_not_down
+    inc byte ptr [clyde_maze_y]
+    jmp @clyde_tunnel_check
+    
+@clyde_any_not_down:
+    cmp si, 3                   ; Left?
+    jne @clyde_any_not_left
+    dec byte ptr [clyde_maze_x]
+    jmp @clyde_tunnel_check
+    
+@clyde_any_not_left:
+    ; Must be right
+    inc byte ptr [clyde_maze_x]
+    jmp @clyde_tunnel_check
+    
+@clyde_next_any:
+    inc si
+    jmp @clyde_any_loop
+    
+@clyde_no_valid_moves:
+    ; No valid moves found, stay in place
+    
+@clyde_tunnel_check:
+    ; Handle maze wrap-around (horizontal tunnels)
+    cmp byte ptr [clyde_maze_x], 0
+    jne @clyde_check_right_tunnel
+    mov byte ptr [clyde_maze_x], 20   ; Wrap to right
+    jmp @clyde_exit_proc
+    
+@clyde_check_right_tunnel:
+    cmp byte ptr [clyde_maze_x], 20
+    jne @clyde_exit_proc
+    mov byte ptr [clyde_maze_x], 0    ; Wrap to left
+    
+@clyde_exit_proc:
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+move_clyde_toward_target endp
 
+;-----------------------------------------------------
+; exit_ghost_house_clyde - Handles Clyde's exit from ghost house
+;-----------------------------------------------------
+exit_ghost_house_clyde proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Increment exit timer
+    inc word ptr [clyde_exit_timer]
+    
+    ; Check if it's time to exit (150 = longest wait)
+    cmp word ptr [clyde_exit_timer], 150
+    jl @stay_inside_clyde
+    
+    ; Check if already outside
+    cmp byte ptr [clyde_in_ghost_house], 0
+    je @already_outside_clyde
+    
+    ; Move to door X position first
+    mov al, [ghost_house_door_x]
+    cmp byte ptr [clyde_maze_x], al
+    je @check_y_position_clyde
+    jl @move_right_clyde
+    jg @move_left_clyde
+    
+@move_right_clyde:
+    ; Move right toward door
+    mov byte ptr [clyde_direction], 4
+    inc byte ptr [clyde_maze_x]
+    jmp @exit_proc_clyde
+    
+@move_left_clyde:
+    ; Move left toward door
+    mov byte ptr [clyde_direction], 3
+    dec byte ptr [clyde_maze_x]
+    jmp @exit_proc_clyde
+    
+@check_y_position_clyde:
+    ; X position matches door, check Y
+    mov al, [ghost_house_door_y]
+    cmp byte ptr [clyde_maze_y], al
+    je @exit_house_clyde
+    jg @move_up_clyde
+    
+@move_up_clyde:
+    ; Move up toward door
+    mov byte ptr [clyde_direction], 1
+    dec byte ptr [clyde_maze_y]
+    jmp @exit_proc_clyde
+    
+@exit_house_clyde:
+    ; At door position - exit ghost house
+    mov byte ptr [clyde_in_ghost_house], 0  ; Mark as outside
+    mov byte ptr [clyde_direction], 1       ; Set direction up
+    dec byte ptr [clyde_maze_y]             ; Move up immediately
+    
+    ; Initialize AI behavior
+    mov byte ptr [clyde_mode], 0            ; Start in scatter mode
+    mov word ptr [clyde_mode_timer], 0      ; Reset mode timer
+    mov byte ptr [clyde_target_x], 0        ; Bottom-left for scatter
+    mov byte ptr [clyde_target_y], 20
+    
+    jmp @exit_proc_clyde
+    
+@stay_inside_clyde:
+    ; Not time to exit yet - do nothing
+    jmp @exit_proc_clyde
+    
+@already_outside_clyde:
+    ; Already outside - do nothing
+    
+@exit_proc_clyde:
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+exit_ghost_house_clyde endp
+
+;-----------------------------------------------------
+; check_player_clyde_collision - Collision detection
+;-----------------------------------------------------
+check_player_clyde_collision proc near
+    push bx
+    push cx
+    push dx
+    
+    ; Calculate distance between sprite centers
+    mov ax, [player_x_pos]
+    add ax, 6               ; Player center X
+    mov bx, [clyde_x_pos]
+    add bx, 6               ; Clyde center X
+    sub ax, bx              ; X difference
+    
+    ; Get absolute value of X difference
+    cmp ax, 0
+    jge @c_pos_x
+    neg ax                  ; Make positive
+@c_pos_x:
+    mov cx, ax              ; Save X difference
+    
+    ; Calculate Y difference
+    mov ax, [player_y_pos]
+    add ax, 6               ; Player center Y
+    mov bx, [clyde_y_pos]
+    add bx, 6               ; Clyde center Y
+    sub ax, bx              ; Y difference
+    
+    ; Get absolute value of Y difference
+    cmp ax, 0
+    jge @c_pos_y
+    neg ax                  ; Make positive
+@c_pos_y:
+    mov dx, ax              ; Save Y difference
+    
+    ; Check if collision (both distances less than 10 pixels)
+    cmp cx, 10
+    jge @c_no_col
+    cmp dx, 10
+    jge @c_no_col
+    
+    ; Collision detected
+    mov al, 1
+    jmp @c_col_exit
+    
+@c_no_col:
+    mov al, 0
+    
+@c_col_exit:
+    pop dx
+    pop cx
+    pop bx
+    ret
+check_player_clyde_collision endp
 
 
 
@@ -4689,13 +5232,13 @@ run_game proc near
     
     ; Initialize Pinky
     mov byte ptr [pinky_in_ghost_house], 1
-	mov word ptr [pinky_exit_timer], 0
+    mov word ptr [pinky_exit_timer], 0
     mov byte ptr [pinky_maze_x], 9
     mov byte ptr [pinky_maze_y], 9
     mov byte ptr [pinky_direction], 4
     call maze_to_screen_pinky
     
-    ; Initialize Inky (new code)
+    ; Initialize Inky
     mov byte ptr [inky_in_ghost_house], 0
     mov word ptr [inky_exit_timer], 0
     mov byte ptr [inky_maze_x], 5
@@ -4708,6 +5251,19 @@ run_game proc near
     mov byte ptr [inky_move_counter], 0
     call maze_to_screen_inky
     
+    ; Initialize Clyde
+    mov byte ptr [clyde_in_ghost_house], 0
+    mov word ptr [clyde_exit_timer], 0
+    mov byte ptr [clyde_maze_x], 13
+    mov byte ptr [clyde_maze_y], 9
+    mov byte ptr [clyde_direction], 4
+    mov byte ptr [clyde_mode], 0
+    mov word ptr [clyde_mode_timer], 0
+    mov byte ptr [clyde_target_x], 0
+    mov byte ptr [clyde_target_y], 20
+    mov byte ptr [clyde_move_counter], 0
+    call maze_to_screen_clyde
+    
     ; Initialize Blinky
     mov word ptr [current_score], 0
     mov word ptr [blinky_draw_mode], 0
@@ -4716,7 +5272,7 @@ run_game proc near
     mov byte ptr [blinky_maze_x], 9
     mov byte ptr [blinky_maze_y], 7
     mov byte ptr [blinky_direction], 4
-	call maze_to_screen_inky
+    call maze_to_screen_blinky
     
     push ax
     push cx
@@ -4738,12 +5294,9 @@ run_game proc near
     
     call DrawCoins
     
- 
-
     call draw_player_improved
-	call draw_all_ghosts
-    call check_coin_collision
-	
+    call draw_all_ghosts
+    call check_coin_collision	
 game_loop:
     call restore_background
     
@@ -4757,6 +5310,7 @@ game_loop:
     call update_blinky
 	call update_pinky
 	call update_inky
+	call update_clyde
     
     call check_player_blinky_collision
     cmp al, 1
@@ -4765,6 +5319,15 @@ game_loop:
 	call check_player_inky_collision
 	cmp al, 1
 	je game_over
+	
+	call check_player_pinky_collision
+	cmp al, 1
+	je game_over
+	
+	call check_player_clyde_collision
+	cmp al, 1
+	je game_over
+
     
     call check_coin_collision
     
@@ -4779,7 +5342,7 @@ game_loop:
     mov cx, 1
 delay_loop:
     push cx
-    mov cx, 5
+    mov cx, 2
 inner_delay:
     loop inner_delay
     pop cx
