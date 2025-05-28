@@ -23,6 +23,7 @@ INKY_FILE_NAME equ 'inky.bmp'
 PAFILE_NAME_IN equ 'pause2.bmp'
 MENU_FILE_IN equ 'menu.bmp'
 GAME_OVER_FILE_IN equ 'over.bmp'
+CLYDE_FILE_NAME equ 'clyde.bmp' ; Filename for Clyde's sprite
 
 ; Game width, height in dosbox
 SCREEN_WIDTH equ 320  
@@ -148,6 +149,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	PAFileName db PAFILE_NAME_IN, 0
 	MenuFileName db MENU_FILE_IN, 0
 	GameOverFileName db GAME_OVER_FILE_IN, 0
+	ClydeFileName db CLYDE_FILE_NAME, 0
 	; Directions for Pacman
 	up dw 1
 	down dw 1
@@ -174,7 +176,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	; === Animation System ===
 	current_frame db 0          ; Animation frame: 0=mouth closed, 1=mouth open  
 	frame_counter db 8          ; Timer controlling animation speed
-	frame_delay db 20           ; Game cycles between frame changes
+	frame_delay db 15           ; Game cycles between frame changes
 	is_moving db 0              ; Movement flag: 0=stopped, 1=moving
 
 	; === Game State ===
@@ -219,12 +221,49 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	ghost_house_door_x db 10
 	ghost_house_door_y db 7
 
-	; Inky variables:
-	
-	
+	; Inky (Blue/Cyan Ghost) Variables
+	inky_x_pos dw 130           ; Screen X position
+	inky_y_pos dw 80            ; Screen Y position  
+	inky_maze_x db 11           ; Maze X coordinate (starts in ghost house)
+	inky_maze_y db 9            ; Maze Y coordinate (ghost house)
+	inky_direction db 4         ; Current direction (1=up, 2=down, 3=left, 4=right)
+	inky_mode db 0              ; 0=scatter, 1=chase
+	inky_mode_timer dw 0        ; Timer for mode switching
+	inky_target_x db 20         ; Target maze X (initially bottom-right for scatter)
+	inky_target_y db 20         ; Target maze Y (bottom-right for scatter)
+	inky_move_counter db 0      ; Movement speed counter
+	inky_move_delay db 14       ; Movement speed (slightly faster than Pinky)
+	inky_scatter_time dw 20     ; Time in scatter mode (ADD THIS)
+	inky_chase_time dw 300      ; Time in chase mode (ADD THIS)
+	inky_bg_buffer db 12*12 dup(0) ; Background save buffer
+	inky_in_ghost_house db 1    ; Starts in ghost house
+	inky_exit_timer dw 0        ; Timer for ghost house exit
+				
+		; Clyde (Orange Ghost) Variables
+	clyde_x_pos dw 170           ; Screen X position
+	clyde_y_pos dw 80            ; Screen Y position  
+	clyde_maze_x db 7            ; Maze X coordinate (starts in different position)
+	clyde_maze_y db 9            ; Maze Y coordinate
+	clyde_direction db 4         ; Current direction (1=up, 2=down, 3=left, 4=right)
+	clyde_mode db 0              ; 0=scatter, 1=chase, 2=frightened
+	clyde_mode_timer dw 0        ; Timer for mode switching
+	clyde_target_x db 0          ; Target maze X (bottom-left for scatter)
+	clyde_target_y db 20         ; Target maze Y (bottom-left for scatter)
+	clyde_move_counter db 0      ; Movement speed counter
+	clyde_move_delay db 18       ; Movement speed (slowest ghost)
+	clyde_scatter_time dw 20     ; Time in scatter mode
+	clyde_chase_time dw 300      ; Time in chase mode
+	clyde_bg_buffer db 12*12 dup(0) ; Background save buffer
+	clyde_in_ghost_house db 1    ; Starts in ghost house
+	clyde_exit_timer dw 0        ; Timer for ghost house exit
+				
+					
 
-	
-	ghost_draw_order db 4, 3, 2, 1  ; Clyde, Inky, Pinky, Blinky
+			
+			
+		
+		
+		
 
 	
 .code
@@ -644,6 +683,54 @@ draw_pinky proc near
     pop ax
     ret
 draw_pinky endp
+
+;-----------------------------------------------------
+; draw_inky - Draws Inky sprite at current position
+;-----------------------------------------------------
+draw_inky proc near
+    push ax
+    push bx
+    push dx
+    
+    mov dx, offset InkyFileName
+    mov ax, [inky_x_pos]
+    mov [BmpLeft], ax
+    mov ax, [inky_y_pos]
+    mov [BmpTop], ax
+    mov [BmpWidth], 12
+    mov [BmpHeight], 12
+    
+    call OpenShowBmpTransparent
+    
+    pop dx
+    pop bx
+    pop ax
+    ret
+draw_inky endp
+
+;-----------------------------------------------------
+; draw_clyde - Draws Clyde sprite at current position
+;-----------------------------------------------------
+draw_clyde proc near
+    push ax
+    push bx
+    push dx
+    
+    mov dx, offset ClydeFileName
+    mov ax, [clyde_x_pos]
+    mov [BmpLeft], ax
+    mov ax, [clyde_y_pos]
+    mov [BmpTop], ax
+    mov [BmpWidth], 12
+    mov [BmpHeight], 12
+    
+    call OpenShowBmpTransparent
+    
+    pop dx
+    pop bx
+    pop ax
+    ret
+draw_clyde endp
 
 
 
@@ -2280,7 +2367,6 @@ exit2:
 game_over_menu endp
 
 
-; Enemies Logic (without drawing):
 
 ;-----------------------------------------------------
 ; draw_all_ghosts - Draws ghosts in correct order for overlap
@@ -2289,30 +2375,19 @@ draw_all_ghosts proc near
     push ax
     push bx
     
-    ; First check if ghosts are overlapping
-    call check_ghost_overlap
-    cmp al, 1
-    je @ghosts_overlapping
-    
+    ; Only draw ghosts every other frame
     ; No overlap - draw all ghosts normally
-    ;call draw_inky      ; If added
-   ; call draw_clyde     ; If added
+    call draw_inky      ; If added
     call draw_pinky
     call draw_blinky
-    jmp @drawing_done
     
-@ghosts_overlapping:
-    ; Ghosts are overlapping - only draw one of them
-    ; We'll choose to draw Blinky (the red ghost) in case of overlap
-    ;call draw_inky      ; If added
-    ;call draw_clyde     ; If added
-    call draw_blinky
-    
-@drawing_done:
+@skip_ghost_drawing:
     pop bx
     pop ax
     ret
 draw_all_ghosts endp
+
+
 
 
 ;-----------------------------------------------------
@@ -2376,6 +2451,65 @@ maze_to_screen_pinky proc near
 maze_to_screen_pinky endp
 
 
+;-----------------------------------------------------
+; maze_to_screen_inky - Converts maze coords to screen coords
+;-----------------------------------------------------
+maze_to_screen_inky proc near
+    push ax
+    push bx
+    
+    ; Convert maze X to screen X
+    xor ah, ah
+    mov al, [inky_maze_x]
+    mov bx, 14              ; Cell width
+    mul bx                  ; AX = maze_x * cell_width
+    add ax, 13              ; Add horizontal maze offset
+    add ax, 1               ; Small centering adjustment
+    mov [inky_x_pos], ax
+    
+    ; Convert maze Y to screen Y
+    xor ah, ah
+    mov al, [inky_maze_y]
+    mov bx, 9               ; Cell height
+    mul bx                  ; AX = maze_y * cell_height
+    add ax, 5               ; Add vertical maze offset
+    add ax, 1               ; Small centering adjustment
+    mov [inky_y_pos], ax
+    
+    pop bx
+    pop ax
+    ret
+maze_to_screen_inky endp
+
+;-----------------------------------------------------
+; maze_to_screen_clyde - Converts maze coords to screen coords
+;-----------------------------------------------------
+maze_to_screen_clyde proc near
+    push ax
+    push bx
+    
+    ; Convert maze X to screen X
+    xor ah, ah
+    mov al, [clyde_maze_x]
+    mov bx, 14              ; Cell width
+    mul bx                  ; AX = maze_x * cell_width
+    add ax, 13              ; Add horizontal maze offset
+    add ax, 1               ; Small centering adjustment
+    mov [clyde_x_pos], ax
+    
+    ; Convert maze Y to screen Y
+    xor ah, ah
+    mov al, [clyde_maze_y]
+    mov bx, 9               ; Cell height
+    mul bx                  ; AX = maze_y * cell_height
+    add ax, 5               ; Add vertical maze offset
+    add ax, 1               ; Small centering adjustment
+    mov [clyde_y_pos], ax
+    
+    pop bx
+    pop ax
+    ret
+maze_to_screen_clyde endp
 
 
 ;-----------------------------------------------------
@@ -2464,6 +2598,27 @@ save_pinky_background proc near
     ret
 save_pinky_background endp
 
+;-----------------------------------------------------
+; save_inky_background - Saves background behind Inky
+;-----------------------------------------------------
+save_inky_background proc near
+    push offset inky_bg_buffer   ; Pointer to buffer
+    push word ptr [inky_y_pos]   ; Y position
+    push word ptr [inky_x_pos]   ; X position
+    call save_ghost_background
+    ret
+save_inky_background endp
+
+;-----------------------------------------------------
+; save_clyde_background - Saves background behind Clyde
+;-----------------------------------------------------
+save_clyde_background proc near
+    push offset clyde_bg_buffer   ; Pointer to buffer
+    push word ptr [clyde_y_pos]   ; Y position
+    push word ptr [clyde_x_pos]   ; X position
+    call save_ghost_background
+    ret
+save_clyde_background endp
 
 ;-----------------------------------------------------
 ; restore_blinky_background - Restores saved background to erase Blinky
@@ -2541,6 +2696,27 @@ restore_pinky_background proc near
     ret
 restore_pinky_background endp
 
+;-----------------------------------------------------
+; restore_inky_background - Restores background behind Inky
+;-----------------------------------------------------
+restore_inky_background proc near
+    push offset inky_bg_buffer   ; Pointer to buffer
+    push word ptr [inky_y_pos]   ; Y position
+    push word ptr [inky_x_pos]   ; X position
+    call restore_ghost_background
+    ret
+restore_inky_background endp
+
+;-----------------------------------------------------
+; restore_clyde_background - Restores background behind Clyde
+;-----------------------------------------------------
+restore_clyde_background proc near
+    push offset clyde_bg_buffer   ; Pointer to buffer
+    push word ptr [clyde_y_pos]   ; Y position
+    push word ptr [clyde_x_pos]   ; X position
+    call restore_ghost_background
+    ret
+restore_clyde_background endp
 
 ;-----------------------------------------------------
 ; is_valid_maze_position - Checks if a maze coordinate is walkable (not a wall)
@@ -2657,7 +2833,7 @@ update_blinky proc near
     je @scatter_mode
     
     ; Chase mode - target Pac-Man's position
-    call set_chase_target
+    call set_blinky_chase_target
     jmp @find_best_direction
     
 @scatter_mode:
@@ -2700,7 +2876,7 @@ update_blinky endp
 ; set_chase_target - Sets Blinky's target to Pac-Man's current maze position
 ; Converts player screen coordinates to maze coordinates
 ;-----------------------------------------------------
-set_chase_target proc near
+set_blinky_chase_target proc near
     push ax
     push bx
     push dx
@@ -2727,7 +2903,7 @@ set_chase_target proc near
     pop bx
     pop ax
     ret
-set_chase_target endp
+set_blinky_chase_target endp
 
 ;-----------------------------------------------------
 ; move_blinky_toward_target - Improved pathfinding with balanced behavior
@@ -3257,7 +3433,7 @@ update_pinky proc near
 
 @handle_ghost_house:
     ; Handle ghost house exit
-    call exit_ghost_house
+    call exit_ghost_house_pinky
     
     ; Convert to screen coordinates
     call maze_to_screen_pinky
@@ -3604,11 +3780,640 @@ check_player_pinky_collision proc near
 check_player_pinky_collision endp
 
 
+;-----------------------------------------------------
+; set_inky_chase_target - Calculate Inky's chase target
+;-----------------------------------------------------
+set_inky_chase_target proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Step 1: Get Pac-Man's position in maze coordinates
+    mov ax, [player_x_pos]
+    add ax, 6               ; Center of player sprite
+    sub ax, 13              ; Subtract maze offset
+    mov cx, 14              ; Cell width
+    xor dx, dx
+    div cx                  ; AX = player maze X
+    mov cl, al              ; CL = player maze X
+    
+    mov ax, [player_y_pos]
+    add ax, 6               ; Center of player sprite
+    sub ax, 5               ; Subtract maze offset
+    mov cx, 9               ; Cell height
+    xor dx, dx
+    div cx                  ; AX = player maze Y
+    mov ch, al              ; CH = player maze Y
+    
+    ; Step 2: Find position 2 tiles ahead of Pac-Man
+    mov dl, cl              ; DL = intermediate target X
+    mov dh, ch              ; DH = intermediate target Y
+    
+    ; Adjust based on Pac-Man's direction
+    mov al, [current_direction]
+    cmp al, 1               ; Going up?
+    jne @not_up2
+    sub dh, 2               ; 2 tiles up
+    jmp @pivot_found
+    
+@not_up2:
+    cmp al, 2               ; Going down?
+    jne @not_down2
+    add dh, 2               ; 2 tiles down
+    jmp @pivot_found
+    
+@not_down2:
+    cmp al, 3               ; Going left?
+    jne @not_left2
+    sub dl, 2               ; 2 tiles left
+    jmp @pivot_found
+    
+@not_left2:
+    cmp al, 4               ; Going right?
+    je @going_right
+    ; If no direction (0), use current position
+    jmp @pivot_found
+    
+@going_right:
+    add dl, 2               ; 2 tiles right
+    
+@pivot_found:
+    ; Ensure pivot point is within maze bounds
+    cmp dl, 0
+    jge @x_lower_ok
+    mov dl, 0
+@x_lower_ok:
+    cmp dl, 20
+    jle @x_upper_ok
+    mov dl, 20
+@x_upper_ok:
+    cmp dh, 0
+    jge @y_lower_ok
+    mov dh, 0
+@y_lower_ok:
+    cmp dh, 20
+    jle @y_upper_ok
+    mov dh, 20
+@y_upper_ok:
+    
+    ; Step 3: Get Blinky's position
+    mov al, [blinky_maze_x]
+    mov ah, [blinky_maze_y]
+    
+    ; Step 4: Calculate vector from Blinky to pivot point
+    mov bl, dl
+    sub bl, al              ; BL = pivot_x - blinky_x
+    mov bh, dh
+    sub bh, ah              ; BH = pivot_y - blinky_y
+    
+    ; Step 5: Double the vector 
+    add bl, bl              ; BL = 2 * (pivot_x - blinky_x)
+    add bh, bh              ; BH = 2 * (pivot_y - blinky_y)
+    
+    ; Step 6: Add vector to pivot point to get final target
+    mov al, dl
+    add al, bl              ; AL = pivot_x + vector_x
+    mov ah, dh
+    add ah, bh              ; AH = pivot_y + vector_y
+    
+    ; Ensure final target is within maze bounds
+    cmp al, 0
+    jge @final_x_lower_ok
+    mov al, 0
+@final_x_lower_ok:
+    cmp al, 20
+    jle @final_x_upper_ok
+    mov al, 20
+@final_x_upper_ok:
+    cmp ah, 0
+    jge @final_y_lower_ok
+    mov ah, 0
+@final_y_lower_ok:
+    cmp ah, 20
+    jle @final_y_upper_ok
+    mov ah, 20
+@final_y_upper_ok:
+    
+    ; Set Inky's target
+    mov [inky_target_x], al
+    mov [inky_target_y], ah
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+set_inky_chase_target endp
+
+
+;-----------------------------------------------------
+; update_inky - Main Inky update procedure
+;-----------------------------------------------------
+; update_inky - Main Inky update procedure
+;-----------------------------------------------------
+update_inky proc near
+    push ax
+    push bx
+    
+    ; Speed control - only move when counter reaches delay
+    inc byte ptr [inky_move_counter]
+    mov al, [inky_move_delay]
+    cmp [inky_move_counter], al
+    jl @skip_inky_move
+    
+    ; Time to move - restore background first
+    call restore_inky_background
+    
+    ; Reset movement counter
+    mov byte ptr [inky_move_counter], 0
+    
+    ; Update mode timer and switch between scatter/chase
+    inc word ptr [inky_mode_timer]
+    
+    ; Check if we need to switch modes
+    mov al, [inky_mode]
+    cmp al, 0                    ; Currently in scatter mode?
+    je @check_inky_scatter_timer
+    
+    ; In chase mode - check if time to switch to scatter
+    mov ax, [inky_mode_timer]
+    cmp ax, [inky_chase_time]
+    jl @set_inky_target
+    
+    ; Switch to scatter mode
+    mov byte ptr [inky_mode], 0
+    mov word ptr [inky_mode_timer], 0
+    jmp @set_inky_target
+    
+@check_inky_scatter_timer:
+    ; In scatter mode - check if time to switch to chase  
+    mov ax, [inky_mode_timer]
+    cmp ax, [inky_scatter_time]
+    jl @set_inky_target
+    
+    ; Switch to chase mode
+    mov byte ptr [inky_mode], 1
+    mov word ptr [inky_mode_timer], 0
+    
+@set_inky_target:
+    ; Set target based on current mode
+    mov al, [inky_mode]
+    cmp al, 0
+    je @inky_scatter_target
+    
+    ; Chase mode - use Inky's special targeting
+    call set_inky_chase_target
+    jmp @move_inky
+    
+@inky_scatter_target:
+    ; Scatter mode - target bottom-right corner
+    mov byte ptr [inky_target_x], 20
+    mov byte ptr [inky_target_y], 20
+    
+@move_inky:
+    ; Execute movement
+    call move_inky_toward_target
+    
+    ; Convert to screen coordinates
+    call maze_to_screen_inky
+    
+    ; Save new background
+    call save_inky_background
+    
+    jmp @inky_update_done
+    
+@skip_inky_move:    
+    ; No movement, do nothing to background
+    
+@inky_update_done:
+    pop bx
+    pop ax
+    ret
+update_inky endp
+
+
+
+;-----------------------------------------------------
+; move_inky_toward_target - Movement algorithm for Inky
+;-----------------------------------------------------
+move_inky_toward_target proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    
+    ; Get current position
+    mov dl, [inky_maze_x]      ; Current X position
+    mov dh, [inky_maze_y]      ; Current Y position
+    mov cl, [inky_direction]   ; Current direction
+    
+    ; STEP 1: Try continuing in current direction
+    mov al, dl                  ; Current X
+    mov bh, dh                  ; Current Y
+    
+    ; Modify position based on current direction
+    cmp cl, 1                   ; Going up?
+    jne @inky_check_down
+    dec bh                      ; Try Y-1
+    jmp @inky_test_direction
+    
+@inky_check_down:
+    cmp cl, 2                   ; Going down?
+    jne @inky_check_left
+    inc bh                      ; Try Y+1
+    jmp @inky_test_direction
+    
+@inky_check_left:
+    cmp cl, 3                   ; Going left?
+    jne @inky_check_right
+    dec al                      ; Try X-1
+    jmp @inky_test_direction
+    
+@inky_check_right:
+    cmp cl, 4                   ; Going right?
+    jne @inky_choose_direction
+    inc al                      ; Try X+1
+    
+@inky_test_direction:
+    ; Test if current direction is still valid (no wall)
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_choose_direction  ; Blocked by wall, need new direction
+    
+    ; Can continue current direction - update position
+    mov al, [inky_direction]
+    cmp al, 1                   ; Was up?
+    jne @inky_continue_not_up
+    dec byte ptr [inky_maze_y]
+    jmp @inky_tunnel_check
+    
+@inky_continue_not_up:
+    cmp al, 2                   ; Was down?
+    jne @inky_continue_not_down
+    inc byte ptr [inky_maze_y]
+    jmp @inky_tunnel_check
+    
+@inky_continue_not_down:
+    cmp al, 3                   ; Was left?
+    jne @inky_continue_not_left
+    dec byte ptr [inky_maze_x]
+    jmp @inky_tunnel_check
+    
+@inky_continue_not_left:
+    ; Must be right
+    inc byte ptr [inky_maze_x]
+    jmp @inky_tunnel_check
+    
+@inky_choose_direction:
+    ; Calculate differences to target
+    mov al, [inky_target_x]
+    sub al, dl                  ; AL = signed X difference
+    mov bl, al                  ; Save signed X diff
+    jns @inky_x_pos
+    neg al                      ; Make absolute
+@inky_x_pos:
+    
+    mov ah, [inky_target_y]
+    sub ah, dh                  ; AH = signed Y difference
+    mov bh, ah                  ; Save signed Y diff
+    jns @inky_y_pos
+    neg ah                      ; Make absolute
+@inky_y_pos:
+    
+    ; Choose primary movement axis
+    cmp al, ah                  ; Compare |x_diff| with |y_diff|
+    jb @inky_try_vertical       ; |x_diff| < |y_diff|
+    je @inky_choose_random      ; Equal differences
+    
+    ; Try horizontal first (larger X difference)
+    cmp bl, 0
+    jl @inky_try_left           ; Target is left
+    jg @inky_try_right          ; Target is right
+    jmp @inky_try_vertical      ; Same X, try vertical
+    
+@inky_choose_random:
+    ; Use system timer for randomness
+    mov ah, 0
+    int 1Ah                     ; Get system time
+    test dl, 1                  ; Test lowest bit
+    jz @inky_try_horizontal     ; Even = horizontal
+    jmp @inky_try_vertical      ; Odd = vertical
+    
+@inky_try_horizontal:
+    cmp bl, 0
+    jl @inky_try_left           ; Target is left
+    jg @inky_try_right          ; Target is right
+    jmp @inky_try_vertical      ; Same X, try vertical
+    
+@inky_try_right:
+    ; Don't reverse from left
+    cmp cl, 3                   ; Was going left?
+    je @inky_try_left           ; Don't reverse
+    
+    ; Test moving right
+    mov al, dl
+    inc al                      ; Try X+1
+    mov bh, dh
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_try_left          ; Can't go right due to wall
+    
+    ; Move right
+    mov byte ptr [inky_direction], 4
+    inc byte ptr [inky_maze_x]
+    jmp @inky_tunnel_check
+    
+@inky_try_left:
+    ; Don't reverse from right
+    cmp cl, 4                   ; Was going right?
+    je @inky_try_vertical       ; Don't reverse
+    
+    ; Test moving left
+    mov al, dl
+    dec al                      ; Try X-1
+    mov bh, dh
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_try_vertical      ; Can't go left due to wall
+    
+    ; Move left
+    mov byte ptr [inky_direction], 3
+    dec byte ptr [inky_maze_x]
+    jmp @inky_tunnel_check
+    
+@inky_try_vertical:
+    ; Try vertical movement
+    cmp bh, 0
+    jl @inky_try_up             ; Target is up
+    jg @inky_try_down           ; Target is down
+    jmp @inky_try_any           ; Same Y, try any
+    
+@inky_try_down:
+    ; Don't reverse from up
+    cmp cl, 1                   ; Was going up?
+    je @inky_try_up             ; Don't reverse
+    
+    ; Test moving down
+    mov al, dl
+    mov bh, dh
+    inc bh                      ; Try Y+1
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_try_up            ; Can't go down due to wall
+    
+    ; Move down
+    mov byte ptr [inky_direction], 2
+    inc byte ptr [inky_maze_y]
+    jmp @inky_tunnel_check
+    
+@inky_try_up:
+    ; Don't reverse from down
+    cmp cl, 2                   ; Was going down?
+    je @inky_try_any            ; Don't reverse
+    
+    ; Test moving up
+    mov al, dl
+    mov bh, dh
+    dec bh                      ; Try Y-1
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_try_any           ; Can't go up due to wall
+    
+    ; Move up
+    mov byte ptr [inky_direction], 1
+    dec byte ptr [inky_maze_y]
+    jmp @inky_tunnel_check
+    
+@inky_try_any:
+    ; Try any valid direction
+    ; First try up if not coming from down
+    cmp cl, 2                   ; Coming from down?
+    je @inky_skip_up            ; Skip opposite direction
+    
+    mov al, dl
+    mov bh, dh
+    dec bh                      ; Y-1 (up)
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_skip_up
+    
+    ; Can move up
+    mov byte ptr [inky_direction], 1
+    dec byte ptr [inky_maze_y]
+    jmp @inky_tunnel_check
+    
+@inky_skip_up:
+    ; Try down if not coming from up
+    cmp cl, 1                   ; Coming from up?
+    je @inky_skip_down          ; Skip opposite direction
+    
+    mov al, dl
+    mov bh, dh
+    inc bh                      ; Y+1 (down)
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_skip_down
+    
+    ; Can move down
+    mov byte ptr [inky_direction], 2
+    inc byte ptr [inky_maze_y]
+    jmp @inky_tunnel_check
+    
+@inky_skip_down:
+    ; Try left if not coming from right
+    cmp cl, 4                   ; Coming from right?
+    je @inky_skip_left          ; Skip opposite direction
+    
+    mov al, dl
+    dec al                      ; X-1 (left)
+    mov bh, dh
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_skip_left
+    
+    ; Can move left
+    mov byte ptr [inky_direction], 3
+    dec byte ptr [inky_maze_x]
+    jmp @inky_tunnel_check
+    
+@inky_skip_left:
+    ; Try right if not coming from left
+    cmp cl, 3                   ; Coming from left?
+    je @inky_no_valid_moves     ; Skip opposite direction
+    
+    mov al, dl
+    inc al                      ; X+1 (right)
+    mov bh, dh
+    call is_valid_maze_position
+    cmp cl, 1
+    jne @inky_no_valid_moves
+    
+    ; Can move right
+    mov byte ptr [inky_direction], 4
+    inc byte ptr [inky_maze_x]
+    jmp @inky_tunnel_check
+    
+@inky_no_valid_moves:
+    ; No valid moves found, stay in place
+    
+@inky_tunnel_check:
+    ; Handle maze wrap-around (horizontal tunnels)
+    cmp byte ptr [inky_maze_x], 0
+    jne @inky_check_right_tunnel
+    mov byte ptr [inky_maze_x], 20   ; Wrap to right
+    jmp @inky_exit_proc
+    
+@inky_check_right_tunnel:
+    cmp byte ptr [inky_maze_x], 20
+    jne @inky_exit_proc
+    mov byte ptr [inky_maze_x], 0    ; Wrap to left
+    
+@inky_exit_proc:
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+move_inky_toward_target endp
+
+
+;-----------------------------------------------------
+; check_player_inky_collision - Collision detection
+;-----------------------------------------------------
+check_player_inky_collision proc near
+    push bx
+    push cx
+    push dx
+    
+    ; Calculate distance between sprite centers
+    mov ax, [player_x_pos]
+    add ax, 6               ; Player center X
+    mov bx, [inky_x_pos]
+    add bx, 6               ; Inky center X
+    sub ax, bx              ; X difference
+    
+    ; Get absolute value of X difference
+    cmp ax, 0
+    jge @i_pos_x
+    neg ax                  ; Make positive
+@i_pos_x:
+    mov cx, ax              ; Save X difference
+    
+    ; Calculate Y difference
+    mov ax, [player_y_pos]
+    add ax, 6               ; Player center Y
+    mov bx, [inky_y_pos]
+    add bx, 6               ; Inky center Y
+    sub ax, bx              ; Y difference
+    
+    ; Get absolute value of Y difference
+    cmp ax, 0
+    jge @i_pos_y
+    neg ax                  ; Make positive
+@i_pos_y:
+    mov dx, ax              ; Save Y difference
+    
+    ; Use a very small collision box - both distances must be 3 pixels or less
+    ; (Original was 10 pixels which is too large)
+    cmp cx, 3
+    jge @i_no_col
+    cmp dx, 3
+    jge @i_no_col
+    
+    ; Collision detected
+    mov al, 1
+    jmp @i_col_exit
+    
+@i_no_col:
+    mov al, 0
+    
+@i_col_exit:
+    pop dx
+    pop cx
+    pop bx
+    ret
+check_player_inky_collision endp
+
+
+;-----------------------------------------------------
+; set_clyde_chase_target - Implements Clyde's unique "shy" behavior
+; Targets player when far away, targets scatter position when close
+;-----------------------------------------------------
+set_clyde_chase_target proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Get player's maze position
+    mov ax, [player_x_pos]
+    add ax, 6               ; Center of player sprite
+    sub ax, 13              ; Subtract maze offset
+    mov bx, 14              ; Cell width
+    xor dx, dx
+    div bx                  ; AX = player maze X
+    mov cl, al              ; CL = player maze X
+    
+    mov ax, [player_y_pos]
+    add ax, 6               ; Center of player sprite
+    sub ax, 5               ; Subtract maze offset
+    mov bx, 9               ; Cell height
+    xor dx, dx
+    div bx                  ; AX = player maze Y
+    mov ch, al              ; CH = player maze Y
+    
+    ; Calculate Manhattan distance to player
+    ; |player_x - clyde_x| + |player_y - clyde_y|
+    mov al, cl
+    sub al, [clyde_maze_x]
+    jns @x_diff_positive
+    neg al
+@x_diff_positive:
+    mov bl, al              ; BL = |player_x - clyde_x|
+    
+    mov al, ch
+    sub al, [clyde_maze_y]
+    jns @y_diff_positive
+    neg al
+@y_diff_positive:
+    add bl, al              ; BL = |player_x - clyde_x| + |player_y - clyde_y|
+    
+    ; If distance >= 8 tiles, target player directly
+    cmp bl, 8
+    jl @target_scatter
+    
+    ; Target player directly
+    mov [clyde_target_x], cl
+    mov [clyde_target_y], ch
+    jmp @target_set
+    
+@target_scatter:
+    ; When close to player, run away to scatter position (bottom-left)
+    mov byte ptr [clyde_target_x], 0
+    mov byte ptr [clyde_target_y], 20
+    
+@target_set:
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+set_clyde_chase_target endp
+
+
+
+
+
+
+
 ; exit_ghost_house - General function for ghosts to exit the ghost house
 ; Input: BL = ghost ID (1=Blinky, 2=Pinky, 3=Inky, 4=Clyde)
 ; Uses ghost-specific variables based on ID
 ;-----------------------------------------------------
-exit_ghost_house proc near
+exit_ghost_house_pinky proc near
     push ax
     push bx
     push cx
@@ -3617,13 +4422,15 @@ exit_ghost_house proc near
     ; Increment exit timer
     inc word ptr [pinky_exit_timer]
     
-    ; Check if it's time to exit (50 = quicker for testing)
+    ; Check if it's time to exit
     cmp word ptr [pinky_exit_timer], 50
-    jl @stay_in_house
+    jl @exit_proc   ; Not time yet, just exit without moving
     
-    ; EXIT SEQUENCE - Simplified and Direct
+    ; Check if already outside
+    cmp byte ptr [pinky_in_ghost_house], 0
+    je @exit_proc
     
-    ; 1. Check if at door position
+    ; EXIT SEQUENCE - Direct path to door
     xor ax, ax
     mov al, [ghost_house_door_x]
     cmp byte ptr [pinky_maze_x], al
@@ -3656,6 +4463,7 @@ exit_ghost_house proc near
     cmp byte ptr [pinky_maze_x], al
     jl @move_right
     jg @move_left
+    jmp @exit_proc
     
 @move_right:
     ; Move right toward door
@@ -3673,41 +4481,6 @@ exit_ghost_house proc near
     ; Already aligned on X, move up to door
     mov byte ptr [pinky_direction], 1
     dec byte ptr [pinky_maze_y]
-    jmp @exit_proc
-    
-@stay_in_house:
-    ; Simple bounce left-right until exit timer expires
-    cmp byte ptr [pinky_direction], 3  ; Currently moving left?
-    je @try_moving_left
-    
-    ; Try moving right
-    cmp byte ptr [pinky_maze_x], 11    ; Right boundary?
-    jge @switch_to_left
-    
-    ; Move right
-    mov byte ptr [pinky_direction], 4
-    inc byte ptr [pinky_maze_x]
-    jmp @exit_proc
-    
-@try_moving_left:
-    ; Try moving left
-    cmp byte ptr [pinky_maze_x], 9     ; Left boundary?
-    jle @switch_to_right
-    
-    ; Move left
-    dec byte ptr [pinky_maze_x]
-    jmp @exit_proc
-    
-@switch_to_left:
-    ; Switch to left direction
-    mov byte ptr [pinky_direction], 3
-    dec byte ptr [pinky_maze_x]
-    jmp @exit_proc
-    
-@switch_to_right:
-    ; Switch to right direction
-    mov byte ptr [pinky_direction], 4
-    inc byte ptr [pinky_maze_x]
     
 @exit_proc:
     pop dx
@@ -3715,7 +4488,88 @@ exit_ghost_house proc near
     pop bx
     pop ax
     ret
-exit_ghost_house endp
+exit_ghost_house_pinky endp
+
+
+; Fixed exit_ghost_house_inky proc
+exit_ghost_house_inky proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Increment exit timer
+    inc word ptr [inky_exit_timer]
+    
+    ; Check if it's time to exit (100 = longer wait than Pinky)
+    cmp word ptr [inky_exit_timer], 100
+    jl @stay_inside
+    
+    ; Check if already outside
+    cmp byte ptr [inky_in_ghost_house], 0
+    je @already_outside
+    
+    ; Move to door X position first
+    mov al, [ghost_house_door_x]
+    cmp byte ptr [inky_maze_x], al
+    je @check_y_position
+    jl @move_right2
+    jg @move_left2
+    
+@move_right2:
+    ; Move right toward door
+    mov byte ptr [inky_direction], 4
+    inc byte ptr [inky_maze_x]
+    jmp @@exit_proc
+    
+@move_left2:
+    ; Move left toward door
+    mov byte ptr [inky_direction], 3
+    dec byte ptr [inky_maze_x]
+    jmp @@exit_proc
+    
+@check_y_position:
+    ; X position matches door, check Y
+    mov al, [ghost_house_door_y]
+    cmp byte ptr [inky_maze_y], al
+    je @exit_house
+    jg @move_up
+    
+@move_up:
+    ; Move up toward door
+    mov byte ptr [inky_direction], 1
+    dec byte ptr [inky_maze_y]
+    jmp @@exit_proc
+    
+@exit_house:
+    ; At door position - exit ghost house
+    mov byte ptr [inky_in_ghost_house], 0   ; Mark as outside
+    mov byte ptr [inky_direction], 1        ; Set direction up
+    dec byte ptr [inky_maze_y]              ; Move up immediately
+    
+    ; Initialize AI behavior
+    mov byte ptr [inky_mode], 0             ; Start in scatter mode
+    mov word ptr [inky_mode_timer], 0       ; Reset mode timer
+    mov byte ptr [inky_target_x], 20        ; Bottom-right for scatter
+    mov byte ptr [inky_target_y], 20
+    
+    jmp @@exit_proc
+    
+@stay_inside:
+    ; Not time to exit yet - do nothing
+    jmp @@exit_proc
+    
+@already_outside:
+    ; Already outside - do nothing
+    
+@@exit_proc:
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+exit_ghost_house_inky endp
+
 
 
 ;-----------------------------------------------------
@@ -3832,16 +4686,37 @@ run_game proc near
     call SetGraphic
     call DrawMaze     
     call maze_to_screen_blinky
-	
-	mov byte ptr [pinky_in_ghost_house], 1
+    
+    ; Initialize Pinky
+    mov byte ptr [pinky_in_ghost_house], 1
 	mov word ptr [pinky_exit_timer], 0
-
-	; Set Pinky's initial position
-	mov byte ptr [pinky_maze_x], 9
-	mov byte ptr [pinky_maze_y], 9
-	mov byte ptr [pinky_direction], 4
-
-	call maze_to_screen_pinky
+    mov byte ptr [pinky_maze_x], 9
+    mov byte ptr [pinky_maze_y], 9
+    mov byte ptr [pinky_direction], 4
+    call maze_to_screen_pinky
+    
+    ; Initialize Inky (new code)
+    mov byte ptr [inky_in_ghost_house], 0
+    mov word ptr [inky_exit_timer], 0
+    mov byte ptr [inky_maze_x], 5
+    mov byte ptr [inky_maze_y], 10 
+    mov byte ptr [inky_direction], 4
+    mov byte ptr [inky_mode], 0
+    mov word ptr [inky_mode_timer], 0
+    mov byte ptr [inky_target_x], 20
+    mov byte ptr [inky_target_y], 20
+    mov byte ptr [inky_move_counter], 0
+    call maze_to_screen_inky
+    
+    ; Initialize Blinky
+    mov word ptr [current_score], 0
+    mov word ptr [blinky_draw_mode], 0
+    mov word ptr [blinky_mode_timer], 0
+    mov byte ptr [blinky_mode], 0
+    mov byte ptr [blinky_maze_x], 9
+    mov byte ptr [blinky_maze_y], 7
+    mov byte ptr [blinky_direction], 4
+	call maze_to_screen_inky
     
     push ax
     push cx
@@ -3863,19 +4738,11 @@ run_game proc near
     
     call DrawCoins
     
-    mov word ptr [current_score], 0
-	mov word ptr [blinky_draw_mode], 0
-    mov word ptr [blinky_mode_timer], 0
-    mov byte ptr [blinky_mode], 0
-    mov byte ptr [blinky_maze_x], 9
-	mov byte ptr [blinky_maze_y], 7
-	mov byte ptr [blinky_direction], 4
  
+
     call draw_player_improved
-    call draw_blinky
-	call draw_pinky
+	call draw_all_ghosts
     call check_coin_collision
-    call vsync
 	
 game_loop:
     call restore_background
@@ -3889,12 +4756,13 @@ game_loop:
     
     call update_blinky
 	call update_pinky
+	call update_inky
     
     call check_player_blinky_collision
     cmp al, 1
     je game_over
 	
-	call check_player_pinky_collision
+	call check_player_inky_collision
 	cmp al, 1
 	je game_over
     
@@ -3911,7 +4779,7 @@ game_loop:
     mov cx, 1
 delay_loop:
     push cx
-    mov cx, 5000
+    mov cx, 5
 inner_delay:
     loop inner_delay
     pop cx
