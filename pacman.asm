@@ -26,7 +26,7 @@ GAME_OVER_FILE_IN equ 'over.bmp'
 CLYDE_FILE_NAME equ 'clyde.bmp' ; Filename for Clyde's sprite
 INFO_FILE_IN equ 'info.bmp'
 TUTORIAL_FILE_IN equ 'tutorial.bmp'
-
+WON_FILE_IN equ 'win.bmp'
 
 SCREEN_WIDTH equ 320  
 SCREEN_HEIGHT equ 200
@@ -153,7 +153,9 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	GameOverFileName db GAME_OVER_FILE_IN, 0
 	InfoFileName db INFO_FILE_IN, 0
 	TutorialFileName db TUTORIAL_FILE_IN, 0
+	WonFileName db WON_FILE_IN, 0
 	ClydeFileName db CLYDE_FILE_NAME, 0
+	
 	; Directions for Pacman
 	up dw 1
 	down dw 1
@@ -267,7 +269,6 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
     inky_sprite_data db 144 dup(?)
     clyde_sprite_data db 144 dup(?)
 			
-					
 
 			
 			
@@ -321,6 +322,32 @@ draw_menu proc near
     pop ax
     ret
 draw_menu endp
+
+;-----------------------------------------------------
+; draw_win - Displays the win screen
+;-----------------------------------------------------
+draw_win proc near
+    push ax
+    push bx
+    push dx
+    
+    mov dx, offset WonFileName 
+    mov ax, 0     
+    mov [BmpLeft], ax
+    mov ax, 0      
+    mov [BmpTop], ax
+    mov [BmpWidth],  320   ; Set width
+    mov [BmpHeight], 200    ; Set height
+    
+    call OpenShowBmp         
+    
+    pop dx
+    pop bx
+    pop ax
+    ret
+draw_win endp
+
+
 
 ;-----------------------------------------------------
 ; draw_info - Displays the information about the game screen
@@ -1934,10 +1961,10 @@ handle_menu_input proc near
         je start_game
         
         cmp al, 'o'       ; 'o' key
-        je exit_program
+        je exit_program1
         
 		cmp al, 'L'
-		je info_page
+		je info_page1
 		
         jmp menu_wait     ; Invalid key, keep waiting
 
@@ -1945,12 +1972,12 @@ handle_menu_input proc near
         call clear_screen
         call run_game     ; This will never return
         ret               ; Safety return (unreachable)
-	info_page:
+	info_page1:
 		call clear_screen
 		call draw_info
 		call handle_info_page
 		ret
-    exit_program:
+    exit_program1:
         call exit_and_cls ; This will terminate the program
         ret               ; Safety return (unreachable)
 handle_menu_input endp
@@ -1962,31 +1989,25 @@ handle_info_page proc near
         mov ah, 00h       ; Wait for keypress
         int 16h
         
-        cmp al, 1Bh       
+        cmp al, 1Bh       ; ESC key (ASCII)
         je handle_menu
         
-		cmp al, "f1"
-		je handle_tutorial
-		
-        jmp info_wait     ; Invalid key, keep waiting
-
-	handle_menu:
-		call clear_screen
-		call draw_menu
-		call handle_menu_input
-	handle_tutorial:
-		call clear_screen
-		call draw_tutorial
-		call handle_tutorial_page
-	
-	
-	info_page:
-		call clear_screen
-		call handle_info_page
-		ret
-    exit_program:
-        call exit_and_cls 
-        ret               
+        cmp ah, 3Bh       ; F1 key (scan code)
+        je handle_tutorial
+        
+        jmp info_wait     ; Keep waiting
+        
+    handle_menu:
+        call clear_screen
+        call draw_menu
+        call handle_menu_input
+        ret
+        
+    handle_tutorial:
+        call clear_screen
+        call draw_tutorial
+        call handle_tutorial_page
+        ret
 handle_info_page endp
 
 handle_tutorial_page proc near
@@ -1995,32 +2016,48 @@ handle_tutorial_page proc near
         int 16h
         
         cmp al, 1Bh       
-        je handle_menu
+        je handle_menu2
         
-		cmp al, "f1"
+        cmp ah, 3Bh       ; F1 key (scan code)
 		je handle_information
 		
         jmp tutorial_wait     ; Invalid key, keep waiting
 
-	handle_menu:
+	handle_menu2:
 		call clear_screen
 		call draw_menu
 		call handle_menu_input
+		ret
 	handle_information:
 		call clear_screen
 		call draw_info
 		call handle_info_page
-	
-	
-	info_page:
-		call clear_screen
-		call handle_info_page
 		ret
-    exit_program:
-        call exit_and_cls 
-        ret               
 handle_tutorial_page endp
 
+handle_win_page proc near
+	call clear_screen
+	call draw_win
+
+didnt_pick_any_option2:
+    mov ah, 00h
+    int 16h
+    
+    cmp al, 1Bh
+    je exit3
+    
+    cmp al, 0Dh  
+    jne didnt_pick_any_option2
+    
+	mov player_x_pos, 155
+	mov player_y_pos, 138 
+    call clear_screen
+    call run_game
+    ret
+exit3:
+    call exit_and_cls
+	ret
+handle_win_page endp
 
 
 
@@ -2550,8 +2587,7 @@ exit:
 pause_menu endp
 
 
-game_over_menu proc near
-	call clear_screen
+handle_game_over_menu proc near
 	call draw_game_over_menu
 
 didnt_pick_any_option:
@@ -2571,7 +2607,7 @@ didnt_pick_any_option:
         
 exit2:
     call exit_and_cls
-game_over_menu endp
+handle_game_over_menu endp
 
 
 
@@ -5532,21 +5568,21 @@ game_loop:
     
 	call check_ghost_overlap
 	
-    call check_player_blinky_collision
-    cmp al, 1
-    je game_over
+   ; call check_player_blinky_collision
+    ;cmp al, 1
+    ;je game_over
     
-    call check_player_inky_collision
-    cmp al, 1
-    je game_over
+    ;call check_player_inky_collision
+    ;cmp al, 1
+    ;je game_over
     
-    call check_player_pinky_collision
-    cmp al, 1
-    je game_over
+   ; call check_player_pinky_collision
+    ;cmp al, 1
+   ; je game_over
     
-    call check_player_clyde_collision
-    cmp al, 1
-    je game_over
+   ; call check_player_clyde_collision
+    ;cmp al, 1
+   ; je game_over
     
     call check_coin_collision
     
@@ -5557,14 +5593,21 @@ game_loop:
     call draw_all_ghosts
     
     call display_score
-    
+	
+	cmp [current_score], 1760
+
+	je win
+	
     call vsync
     
     jmp game_loop
     
 game_over:
-    call game_over_menu
+    call handle_game_over_menu
     ret
+win:
+	call handle_win_page
+	ret
 run_game endp
 
 
