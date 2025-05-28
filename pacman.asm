@@ -24,8 +24,10 @@ PAFILE_NAME_IN equ 'pause2.bmp'
 MENU_FILE_IN equ 'menu.bmp'
 GAME_OVER_FILE_IN equ 'over.bmp'
 CLYDE_FILE_NAME equ 'clyde.bmp' ; Filename for Clyde's sprite
+INFO_FILE_IN equ 'info.bmp'
+TUTORIAL_FILE_IN equ 'tutorial.bmp'
 
-; Game width, height in dosbox
+
 SCREEN_WIDTH equ 320  
 SCREEN_HEIGHT equ 200
 
@@ -149,6 +151,8 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	PAFileName db PAFILE_NAME_IN, 0
 	MenuFileName db MENU_FILE_IN, 0
 	GameOverFileName db GAME_OVER_FILE_IN, 0
+	InfoFileName db INFO_FILE_IN, 0
+	TutorialFileName db TUTORIAL_FILE_IN, 0
 	ClydeFileName db CLYDE_FILE_NAME, 0
 	; Directions for Pacman
 	up dw 1
@@ -256,7 +260,13 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	clyde_bg_buffer db 12*12 dup(0) ; Background save buffer
 	clyde_in_ghost_house db 1    ; Starts in ghost house
 	clyde_exit_timer dw 0        ; Timer for ghost house exit
-				
+	
+    blinky_sprite_data db 144 dup(?)
+    blinky_sprite2_data db 144 dup(?)  ; For chase mode
+    pinky_sprite_data db 144 dup(?)
+    inky_sprite_data db 144 dup(?)
+    clyde_sprite_data db 144 dup(?)
+			
 					
 
 			
@@ -311,6 +321,53 @@ draw_menu proc near
     pop ax
     ret
 draw_menu endp
+
+;-----------------------------------------------------
+; draw_info - Displays the information about the game screen
+;-----------------------------------------------------
+draw_info proc near
+    push ax
+    push bx
+    push dx
+    
+    mov dx, offset InfoFileName 
+    mov ax, 0     
+    mov [BmpLeft], ax
+    mov ax, 0      
+    mov [BmpTop], ax
+    mov [BmpWidth],  320   ; Set width
+    mov [BmpHeight], 200    ; Set height
+    
+    call OpenShowBmp         
+    
+    pop dx
+    pop bx
+    pop ax
+    ret
+draw_info endp
+
+draw_tutorial proc near
+    push ax
+    push bx
+    push dx
+    
+    mov dx, offset TutorialFileName 
+    mov ax, 0     
+    mov [BmpLeft], ax
+    mov ax, 0      
+    mov [BmpTop], ax
+    mov [BmpWidth],  320   ; Set width
+    mov [BmpHeight], 200    ; Set height
+    
+    call OpenShowBmp         
+    
+    pop dx
+    pop bx
+    pop ax
+    ret
+draw_tutorial endp
+
+
 
 ;-----------------------------------------------------
 ; draw_pause_menu - Displays the pause menu screen
@@ -629,35 +686,27 @@ draw_rect endp
 ;-----------------------------------------------------
 draw_blinky proc near
     push ax
-    push bx
-    push dx
+    push si
     
-    ; First determine which sprite to use based on mode
-    cmp [blinky_mode], 1
-    je @use_chase_sprite
-    
-    ; Scatter mode sprite
-    mov dx, offset BlinkyFileName
-    jmp @draw_sprite2
-    
-@use_chase_sprite:
-    ; Chase mode sprite
-    mov dx, offset BlinkyFileName2
-    
-@draw_sprite2:
-    ; Now set up position and dimensions
+    ; Set position
     mov ax, [blinky_x_pos]
     mov [BmpLeft], ax
     mov ax, [blinky_y_pos]
     mov [BmpTop], ax
-    mov [BmpWidth], 12
-    mov [BmpHeight], 12
     
-    ; Draw the sprite
-    call OpenShowBmpTransparent
+    ; Choose sprite based on mode
+    cmp [blinky_mode], 1
+    je @use_chase_sprite
+    mov si, offset blinky_sprite_data
+    jmp @draw_it
     
-    pop dx
-    pop bx
+@use_chase_sprite:
+    mov si, offset blinky_sprite2_data
+    
+@draw_it:
+    call draw_ghost_from_buffer
+    
+    pop si
     pop ax
     ret
 draw_blinky endp
@@ -665,69 +714,51 @@ draw_blinky endp
 
 draw_pinky proc near
     push ax
-    push bx
-    push dx
-	
-    mov dx, offset PinkyFileName
-	mov ax, [pinky_x_pos]
-	mov [BmpLeft], ax
-	mov ax, [pinky_y_pos]
-    mov [BmpTop], ax
-    mov [BmpWidth], 12
-    mov [BmpHeight], 12
-
-    call OpenShowBmpTransparent
+    push si
     
-    pop dx
-    pop bx
+    mov ax, [pinky_x_pos]
+    mov [BmpLeft], ax
+    mov ax, [pinky_y_pos]
+    mov [BmpTop], ax
+    
+    mov si, offset pinky_sprite_data
+    call draw_ghost_from_buffer
+    
+    pop si
     pop ax
     ret
 draw_pinky endp
 
-;-----------------------------------------------------
-; draw_inky - Draws Inky sprite at current position
-;-----------------------------------------------------
 draw_inky proc near
     push ax
-    push bx
-    push dx
+    push si
     
-    mov dx, offset InkyFileName
     mov ax, [inky_x_pos]
     mov [BmpLeft], ax
     mov ax, [inky_y_pos]
     mov [BmpTop], ax
-    mov [BmpWidth], 12
-    mov [BmpHeight], 12
     
-    call OpenShowBmpTransparent
+    mov si, offset inky_sprite_data
+    call draw_ghost_from_buffer
     
-    pop dx
-    pop bx
+    pop si
     pop ax
     ret
 draw_inky endp
 
-;-----------------------------------------------------
-; draw_clyde - Draws Clyde sprite at current position
-;-----------------------------------------------------
 draw_clyde proc near
     push ax
-    push bx
-    push dx
+    push si
     
-    mov dx, offset ClydeFileName
     mov ax, [clyde_x_pos]
     mov [BmpLeft], ax
     mov ax, [clyde_y_pos]
     mov [BmpTop], ax
-    mov [BmpWidth], 12
-    mov [BmpHeight], 12
     
-    call OpenShowBmpTransparent
+    mov si, offset clyde_sprite_data
+    call draw_ghost_from_buffer
     
-    pop dx
-    pop bx
+    pop si
     pop ax
     ret
 draw_clyde endp
@@ -1411,6 +1442,164 @@ ShowBMP proc near
     ret
 ShowBMP endp
 
+load_sprite_to_buffer proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    
+    ; Open the file
+    mov ah, 3Dh
+    xor al, al
+    int 21h
+    jc @load_error
+    mov bx, ax  ; Save file handle
+    
+    ; Read header (54 bytes)
+    mov ah, 3Fh
+    mov cx, 54
+    mov dx, offset Header
+    int 21h
+    
+    ; Read palette (1024 bytes)
+    mov ah, 3Fh
+    mov cx, 1024
+    mov dx, offset Palette
+    int 21h
+    
+    ; Now read the actual sprite data
+    ; BMP files store images upside-down, so we need to read from bottom to top
+    mov si, di  ; Save start of buffer
+    add di, 132 ; Point to last row (11 * 12)
+    
+    mov cx, 12  ; 12 rows
+@read_row:
+    push cx
+    
+    ; Read one row (12 bytes)
+    mov ah, 3Fh
+    mov cx, 12
+    mov dx, di
+    int 21h
+    
+    sub di, 12  ; Move to previous row
+    
+    pop cx
+    loop @read_row
+    
+    ; Close file
+    mov ah, 3Eh
+    int 21h
+    
+@load_error:
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+load_sprite_to_buffer endp
+
+load_all_ghost_sprites proc near
+    push ax
+    push dx
+    push di
+    
+    ; Load Blinky sprite 1
+    mov dx, offset BlinkyFileName
+    mov di, offset blinky_sprite_data
+    call load_sprite_to_buffer
+    
+    ; Load Blinky sprite 2 (chase mode)
+    mov dx, offset BlinkyFileName2
+    mov di, offset blinky_sprite2_data
+    call load_sprite_to_buffer
+    
+    ; Load Pinky sprite
+    mov dx, offset PinkyFileName
+    mov di, offset pinky_sprite_data
+    call load_sprite_to_buffer
+    
+    ; Load Inky sprite
+    mov dx, offset InkyFileName
+    mov di, offset inky_sprite_data
+    call load_sprite_to_buffer
+    
+    ; Load Clyde sprite
+    mov dx, offset ClydeFileName
+    mov di, offset clyde_sprite_data
+    call load_sprite_to_buffer
+    
+    pop di
+    pop dx
+    pop ax
+    ret
+load_all_ghost_sprites endp
+
+
+; Draw sprite from memory buffer
+; Input: SI = sprite data offset, DI = screen position
+draw_ghost_from_buffer proc near
+    push ax
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    
+    ; Set up screen segment
+    mov ax, 0A000h
+    mov es, ax
+    
+    ; Calculate screen position
+    mov ax, [BmpTop]
+    mov cx, 320
+    mul cx
+    add ax, [BmpLeft]
+    mov di, ax
+    
+    ; Draw 12x12 sprite
+    mov dx, 12  ; Height
+@draw_row:
+    push di
+    mov cx, 12  ; Width
+@draw_pixel:
+    lodsb       ; Get pixel from buffer
+    cmp al, 0   ; Check if black (transparent)
+    je @skip_pixel
+    
+    ; Check if we're drawing over a wall
+    mov ah, es:[di]
+    cmp ah, BLUE
+    je @skip_pixel  ; Don't draw over walls
+    
+    stosb       ; Write pixel to screen
+    jmp @next_pixel
+    
+@skip_pixel:
+    inc di      ; Skip this pixel
+    
+@next_pixel:
+    loop @draw_pixel
+    
+    pop di
+    add di, 320  ; Next screen row
+    dec dx
+    jnz @draw_row
+    
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop ax
+    ret
+draw_ghost_from_buffer endp
+
+
 
 ;-----------------------------------------------------
 ; ShowBMPTransparent - Displays BMP with transparency, skips black pixels and wall collisions
@@ -1514,65 +1703,6 @@ ShowBMPTransparent proc near
     ret
 ShowBMPTransparent endp
 
-;-----------------------------------------------------
-; snap_to_grid - Aligns player position to grid cells for smoother movement
-;-----------------------------------------------------
-snap_to_grid proc near
-    push ax
-    push bx
-    push dx
-    
-    ; Only snap when changing directions
-    cmp [grid_snap_enabled], 1
-    jne @skip_snap
-    
-    ; Calculate proper X position (center in cell)
-    mov ax, [player_x_pos]
-    add ax, 6         ; Add half player width
-    sub ax, 13        ; Subtract maze offset
-    mov bx, 14        ; Cell width
-    div bl            ; AL = cell index, AH = remainder
-    
-    ; If remainder is close to middle, snap to center
-    cmp ah, 7
-    jl @check_y       ; Less than half, don't snap X
-    cmp ah, 9
-    jg @check_y       ; More than half+2, don't snap X
-    
-    ; Snap X to center of cell
-    mul bl            ; AX = cell_index * cell_width
-    add ax, 13        ; Add maze offset
-    add ax, 7         ; Center in cell
-    sub ax, 6         ; Adjust for half player width
-    mov [player_x_pos], ax
-    
-@check_y:
-    ; Calculate proper Y position (center in cell)
-    mov ax, [player_y_pos]
-    add ax, 6         ; Add half player height
-    sub ax, 5         ; Subtract maze offset
-    mov bx, 9         ; Cell height
-    div bl            ; AL = cell index, AH = remainder
-    
-    ; If remainder is close to middle, snap to center
-    cmp ah, 4
-    jl @skip_snap     ; Less than half, don't snap
-    cmp ah, 6
-    jg @skip_snap     ; More than half+2, don't snap
-    
-    ; Snap Y to center of cell
-    mul bl            ; AX = cell_index * cell_height
-    add ax, 5         ; Add maze offset
-    add ax, 4         ; Center in cell
-    sub ax, 6         ; Adjust for half player height
-    mov [player_y_pos], ax
-    
-@skip_snap:
-    pop dx
-    pop bx
-    pop ax
-    ret
-snap_to_grid endp
 
 ;-----------------------------------------------------
 ; check_input - Handles keyboard input and player movement logic
@@ -1806,17 +1936,94 @@ handle_menu_input proc near
         cmp al, 'o'       ; 'o' key
         je exit_program
         
+		cmp al, 'L'
+		je info_page
+		
         jmp menu_wait     ; Invalid key, keep waiting
 
     start_game:
         call clear_screen
         call run_game     ; This will never return
         ret               ; Safety return (unreachable)
-
+	info_page:
+		call clear_screen
+		call draw_info
+		call handle_info_page
+		ret
     exit_program:
-        call ExitGraphic ; This will terminate the program
+        call exit_and_cls ; This will terminate the program
         ret               ; Safety return (unreachable)
 handle_menu_input endp
+
+
+
+handle_info_page proc near
+    info_wait:
+        mov ah, 00h       ; Wait for keypress
+        int 16h
+        
+        cmp al, 1Bh       
+        je handle_menu
+        
+		cmp al, "f1"
+		je handle_tutorial
+		
+        jmp info_wait     ; Invalid key, keep waiting
+
+	handle_menu:
+		call clear_screen
+		call draw_menu
+		call handle_menu_input
+	handle_tutorial:
+		call clear_screen
+		call draw_tutorial
+		call handle_tutorial_page
+	
+	
+	info_page:
+		call clear_screen
+		call handle_info_page
+		ret
+    exit_program:
+        call exit_and_cls 
+        ret               
+handle_info_page endp
+
+handle_tutorial_page proc near
+    tutorial_wait:
+        mov ah, 00h       ; Wait for keypress
+        int 16h
+        
+        cmp al, 1Bh       
+        je handle_menu
+        
+		cmp al, "f1"
+		je handle_information
+		
+        jmp tutorial_wait     ; Invalid key, keep waiting
+
+	handle_menu:
+		call clear_screen
+		call draw_menu
+		call handle_menu_input
+	handle_information:
+		call clear_screen
+		call draw_info
+		call handle_info_page
+	
+	
+	info_page:
+		call clear_screen
+		call handle_info_page
+		ret
+    exit_program:
+        call exit_and_cls 
+        ret               
+handle_tutorial_page endp
+
+
+
+
 
 ;-----------------------------------------------------
 ; clear_screen - Fills screen with black pixels
@@ -3906,71 +4113,82 @@ set_inky_chase_target endp
 
 ;-----------------------------------------------------
 ; update_inky - Main Inky update procedure
-;-----------------------------------------------------
-; update_inky - Main Inky update procedure
-;-----------------------------------------------------
 update_inky proc near
     push ax
     push bx
     
-    ; Speed control - only move when counter reaches delay
+    ; Increment movement counter for speed control
     inc byte ptr [inky_move_counter]
     mov al, [inky_move_delay]
     cmp [inky_move_counter], al
-    jl @skip_inky_move
+    jge @time_to_move2         ; Time to move
+    jmp @skip_inky_move3
     
-    ; Time to move - restore background first
+@time_to_move2:
+    ; Restore background at CURRENT position before moving
     call restore_inky_background
     
     ; Reset movement counter
     mov byte ptr [inky_move_counter], 0
     
+    ; Check if in ghost house
+    cmp byte ptr [inky_in_ghost_house], 1
+    je @handle_ghost_house3
+    
+    ; Ghost is outside - update mode and target
     ; Update mode timer and switch between scatter/chase
     inc word ptr [inky_mode_timer]
     
     ; Check if we need to switch modes
     mov al, [inky_mode]
     cmp al, 0                    ; Currently in scatter mode?
-    je @check_inky_scatter_timer
+    je @check_scatter_timer3
     
     ; In chase mode - check if time to switch to scatter
     mov ax, [inky_mode_timer]
     cmp ax, [inky_chase_time]
-    jl @set_inky_target
+    jl @set_chase_target2        ; Continue chasing
     
     ; Switch to scatter mode
     mov byte ptr [inky_mode], 0
     mov word ptr [inky_mode_timer], 0
-    jmp @set_inky_target
+    jmp @set_scatter_target2
     
-@check_inky_scatter_timer:
+@check_scatter_timer3:
     ; In scatter mode - check if time to switch to chase  
     mov ax, [inky_mode_timer]
     cmp ax, [inky_scatter_time]
-    jl @set_inky_target
+    jl @set_scatter_target2      ; Continue scattering
     
     ; Switch to chase mode
     mov byte ptr [inky_mode], 1
     mov word ptr [inky_mode_timer], 0
     
-@set_inky_target:
-    ; Set target based on current mode
-    mov al, [inky_mode]
-    cmp al, 0
-    je @inky_scatter_target
-    
-    ; Chase mode - use Inky's special targeting
+@set_chase_target2:
+    ; Chase mode - target 4 tiles ahead of player
     call set_inky_chase_target
-    jmp @move_inky
+    jmp @execute_movement2
     
-@inky_scatter_target:
-    ; Scatter mode - target bottom-right corner
-    mov byte ptr [inky_target_x], 20
-    mov byte ptr [inky_target_y], 20
+@set_scatter_target2:
+    ; Scatter mode - target top-left corner
+    mov byte ptr [inky_target_x], 1   ; Left side
+    mov byte ptr [inky_target_y], 1   ; Top side
     
-@move_inky:
-    ; Execute movement
+@execute_movement2:
+    ; Execute movement toward target
     call move_inky_toward_target
+    
+    ; Convert maze coordinates back to screen position
+    call maze_to_screen_inky
+    
+    ; Save the background at the NEW position
+    call save_inky_background
+    
+    jmp @inky_update_done2
+
+@handle_ghost_house3:
+    ; Handle ghost house exit
+    call exit_ghost_house_inky
     
     ; Convert to screen coordinates
     call maze_to_screen_inky
@@ -3978,12 +4196,10 @@ update_inky proc near
     ; Save new background
     call save_inky_background
     
-    jmp @inky_update_done
-    
-@skip_inky_move:    
+@skip_inky_move3:    
     ; No movement, do nothing to background
     
-@inky_update_done:
+@inky_update_done2:
     pop bx
     pop ax
     ret
@@ -4415,13 +4631,15 @@ update_clyde proc near
     push ax
     push bx
     
-    ; Speed control - only move when counter reaches delay
+    ; Increment movement counter for speed control
     inc byte ptr [clyde_move_counter]
     mov al, [clyde_move_delay]
     cmp [clyde_move_counter], al
-    jl @skip_clyde_move
+    jge @time_to_move3         ; Time to move
+    jmp @skip_clyde_move3
     
-    ; Time to move - restore background first
+@time_to_move3:
+    ; Restore background at CURRENT position before moving
     call restore_clyde_background
     
     ; Reset movement counter
@@ -4429,64 +4647,60 @@ update_clyde proc near
     
     ; Check if in ghost house
     cmp byte ptr [clyde_in_ghost_house], 1
-    je @handle_ghost_house2
+    je @handle_ghost_house4
     
+    ; Ghost is outside - update mode and target
     ; Update mode timer and switch between scatter/chase
     inc word ptr [clyde_mode_timer]
     
     ; Check if we need to switch modes
     mov al, [clyde_mode]
     cmp al, 0                    ; Currently in scatter mode?
-    je @check_clyde_scatter_timer
+    je @check_scatter_timer4
     
     ; In chase mode - check if time to switch to scatter
     mov ax, [clyde_mode_timer]
     cmp ax, [clyde_chase_time]
-    jl @set_clyde_target
+    jl @set_chase_target3        ; Continue chasing
     
     ; Switch to scatter mode
     mov byte ptr [clyde_mode], 0
     mov word ptr [clyde_mode_timer], 0
-    jmp @set_clyde_target
+    jmp @set_scatter_target3
     
-@check_clyde_scatter_timer:
+@check_scatter_timer4:
     ; In scatter mode - check if time to switch to chase  
     mov ax, [clyde_mode_timer]
     cmp ax, [clyde_scatter_time]
-    jl @set_clyde_target
+    jl @set_scatter_target3      ; Continue scattering
     
     ; Switch to chase mode
     mov byte ptr [clyde_mode], 1
     mov word ptr [clyde_mode_timer], 0
     
-@set_clyde_target:
-    ; Set target based on current mode
-    mov al, [clyde_mode]
-    cmp al, 0
-    je @clyde_scatter_target
-    
-    ; Chase mode - use Clyde's special targeting
+@set_chase_target3:
+    ; Chase mode - target 4 tiles ahead of player
     call set_clyde_chase_target
-    jmp @move_clyde
+    jmp @execute_movement3
     
-@clyde_scatter_target:
-    ; Scatter mode - target bottom-left corner
-    mov byte ptr [clyde_target_x], 0
-    mov byte ptr [clyde_target_y], 20
+@set_scatter_target3:
+    ; Scatter mode - target top-left corner
+    mov byte ptr [clyde_target_x], 1   ; Left side
+    mov byte ptr [clyde_target_y], 1   ; Top side
     
-@move_clyde:
-    ; Execute movement
+@execute_movement3:
+    ; Execute movement toward target
     call move_clyde_toward_target
     
-    ; Convert to screen coordinates
+    ; Convert maze coordinates back to screen position
     call maze_to_screen_clyde
     
-    ; Save new background
+    ; Save the background at the NEW position
     call save_clyde_background
     
-    jmp @clyde_update_done
+    jmp @clyde_update_done2
 
-@handle_ghost_house2:
+@handle_ghost_house4:
     ; Handle ghost house exit
     call exit_ghost_house_clyde
     
@@ -4496,10 +4710,10 @@ update_clyde proc near
     ; Save new background
     call save_clyde_background
     
-@skip_clyde_move:    
+@skip_clyde_move3:    
     ; No movement, do nothing to background
     
-@clyde_update_done:
+@clyde_update_done2:
     pop bx
     pop ax
     ret
@@ -4817,7 +5031,7 @@ move_clyde_toward_target endp
 ; exit_ghost_house_clyde - Handles Clyde's exit from ghost house
 ;-----------------------------------------------------
 exit_ghost_house_clyde proc near
-    push ax
+     push ax
     push bx
     push cx
     push dx
@@ -4825,68 +5039,67 @@ exit_ghost_house_clyde proc near
     ; Increment exit timer
     inc word ptr [clyde_exit_timer]
     
-    ; Check if it's time to exit (150 = longest wait)
+    ; Check if it's time to exit
     cmp word ptr [clyde_exit_timer], 150
-    jl @stay_inside_clyde
+    jl @exit_proc4   ; Not time yet, just exit without moving
     
     ; Check if already outside
     cmp byte ptr [clyde_in_ghost_house], 0
-    je @already_outside_clyde
+    je @exit_proc4
     
-    ; Move to door X position first
+    ; EXIT SEQUENCE - Direct path to door
+    xor ax, ax
     mov al, [ghost_house_door_x]
     cmp byte ptr [clyde_maze_x], al
-    je @check_y_position_clyde
-    jl @move_right_clyde
-    jg @move_left_clyde
+    jne @move_to_door_x3
     
-@move_right_clyde:
-    ; Move right toward door
-    mov byte ptr [clyde_direction], 4
-    inc byte ptr [clyde_maze_x]
-    jmp @exit_proc_clyde
-    
-@move_left_clyde:
-    ; Move left toward door
-    mov byte ptr [clyde_direction], 3
-    dec byte ptr [clyde_maze_x]
-    jmp @exit_proc_clyde
-    
-@check_y_position_clyde:
-    ; X position matches door, check Y
+    ; X is aligned, check Y
     mov al, [ghost_house_door_y]
     cmp byte ptr [clyde_maze_y], al
-    je @exit_house_clyde
-    jg @move_up_clyde
+    jne @move_to_door_y3
     
-@move_up_clyde:
-    ; Move up toward door
-    mov byte ptr [clyde_direction], 1
-    dec byte ptr [clyde_maze_y]
-    jmp @exit_proc_clyde
-    
-@exit_house_clyde:
     ; At door position - exit ghost house
     mov byte ptr [clyde_in_ghost_house], 0  ; Mark as outside
     mov byte ptr [clyde_direction], 1       ; Set direction up
     dec byte ptr [clyde_maze_y]             ; Move up immediately
     
-    ; Initialize AI behavior
+    ; Initialize normal AI behavior
     mov byte ptr [clyde_mode], 0            ; Start in scatter mode
     mov word ptr [clyde_mode_timer], 0      ; Reset mode timer
-    mov byte ptr [clyde_target_x], 0        ; Bottom-left for scatter
-    mov byte ptr [clyde_target_y], 20
     
-    jmp @exit_proc_clyde
+    ; Set initial target (top-left corner for scatter)
+    mov byte ptr [clyde_target_x], 1
+    mov byte ptr [clyde_target_y], 1
     
-@stay_inside_clyde:
-    ; Not time to exit yet - do nothing
-    jmp @exit_proc_clyde
+    jmp @exit_proc4
     
-@already_outside_clyde:
-    ; Already outside - do nothing
+@move_to_door_x3:
+    ; Move toward door X coordinate
+    xor ax, ax
+    mov al, [ghost_house_door_x]
+    cmp byte ptr [clyde_maze_x], al
+    jl @move_right3
+    jg @move_left3
+    jmp @exit_proc4
     
-@exit_proc_clyde:
+@move_right3:
+    ; Move right toward door
+    mov byte ptr [clyde_direction], 4
+    inc byte ptr [clyde_maze_x]
+    jmp @exit_proc4
+    
+@move_left3:
+    ; Move left toward door
+    mov byte ptr [clyde_direction], 3
+    dec byte ptr [clyde_maze_x]
+    jmp @exit_proc4
+    
+@move_to_door_y3:
+    ; Already aligned on X, move up to door
+    mov byte ptr [clyde_direction], 1
+    dec byte ptr [clyde_maze_y]
+    
+@exit_proc4:
     pop dx
     pop cx
     pop bx
@@ -5044,68 +5257,67 @@ exit_ghost_house_inky proc near
     ; Increment exit timer
     inc word ptr [inky_exit_timer]
     
-    ; Check if it's time to exit (100 = longer wait than Pinky)
+    ; Check if it's time to exit
     cmp word ptr [inky_exit_timer], 100
-    jl @stay_inside
+    jl @exit_proc6   ; Not time yet, just exit without moving
     
     ; Check if already outside
     cmp byte ptr [inky_in_ghost_house], 0
-    je @already_outside
+    je @exit_proc6
     
-    ; Move to door X position first
+    ; EXIT SEQUENCE - Direct path to door
+    xor ax, ax
     mov al, [ghost_house_door_x]
     cmp byte ptr [inky_maze_x], al
-    je @check_y_position
+    jne @move_to_door_x2
+    
+    ; X is aligned, check Y
+    mov al, [ghost_house_door_y]
+    cmp byte ptr [inky_maze_y], al
+    jne @move_to_door_y2
+    
+    ; At door position - exit ghost house
+    mov byte ptr [inky_in_ghost_house], 0  ; Mark as outside
+    mov byte ptr [inky_direction], 1       ; Set direction up
+    dec byte ptr [inky_maze_y]             ; Move up immediately
+    
+    ; Initialize normal AI behavior
+    mov byte ptr [inky_mode], 0            ; Start in scatter mode
+    mov word ptr [inky_mode_timer], 0      ; Reset mode timer
+    
+    ; Set initial target (top-left corner for scatter)
+    mov byte ptr [inky_target_x], 1
+    mov byte ptr [inky_target_y], 1
+    
+    jmp @exit_proc6
+    
+@move_to_door_x2:
+    ; Move toward door X coordinate
+    xor ax, ax
+    mov al, [ghost_house_door_x]
+    cmp byte ptr [inky_maze_x], al
     jl @move_right2
     jg @move_left2
+    jmp @exit_proc6
     
 @move_right2:
     ; Move right toward door
     mov byte ptr [inky_direction], 4
     inc byte ptr [inky_maze_x]
-    jmp @@exit_proc
+    jmp @exit_proc6
     
 @move_left2:
     ; Move left toward door
     mov byte ptr [inky_direction], 3
     dec byte ptr [inky_maze_x]
-    jmp @@exit_proc
+    jmp @exit_proc6
     
-@check_y_position:
-    ; X position matches door, check Y
-    mov al, [ghost_house_door_y]
-    cmp byte ptr [inky_maze_y], al
-    je @exit_house
-    jg @move_up
-    
-@move_up:
-    ; Move up toward door
+@move_to_door_y2:
+    ; Already aligned on X, move up to door
     mov byte ptr [inky_direction], 1
     dec byte ptr [inky_maze_y]
-    jmp @@exit_proc
     
-@exit_house:
-    ; At door position - exit ghost house
-    mov byte ptr [inky_in_ghost_house], 0   ; Mark as outside
-    mov byte ptr [inky_direction], 1        ; Set direction up
-    dec byte ptr [inky_maze_y]              ; Move up immediately
-    
-    ; Initialize AI behavior
-    mov byte ptr [inky_mode], 0             ; Start in scatter mode
-    mov word ptr [inky_mode_timer], 0       ; Reset mode timer
-    mov byte ptr [inky_target_x], 20        ; Bottom-right for scatter
-    mov byte ptr [inky_target_y], 20
-    
-    jmp @@exit_proc
-    
-@stay_inside:
-    ; Not time to exit yet - do nothing
-    jmp @@exit_proc
-    
-@already_outside:
-    ; Already outside - do nothing
-    
-@@exit_proc:
+@exit_proc6:
     pop dx
     pop cx
     pop bx
@@ -5195,6 +5407,7 @@ check_ghost_overlap proc near
     cmp al, bl
     jne @no_overlap
     
+	
     ; Ghosts are at the same position
     mov al, 1
     jmp @exit_proc
@@ -5227,7 +5440,10 @@ exit_and_cls endp
 ;-----------------------------------------------------
 run_game proc near
     call SetGraphic
-    call DrawMaze     
+    call DrawMaze
+    
+    ; Load all ghost sprites into memory BEFORE the game starts
+    
     call maze_to_screen_blinky
     
     ; Initialize Pinky
@@ -5239,10 +5455,10 @@ run_game proc near
     call maze_to_screen_pinky
     
     ; Initialize Inky
-    mov byte ptr [inky_in_ghost_house], 0
+    mov byte ptr [inky_in_ghost_house], 1
     mov word ptr [inky_exit_timer], 0
-    mov byte ptr [inky_maze_x], 5
-    mov byte ptr [inky_maze_y], 10 
+    mov byte ptr [inky_maze_x], 11
+    mov byte ptr [inky_maze_y], 9 
     mov byte ptr [inky_direction], 4
     mov byte ptr [inky_mode], 0
     mov word ptr [inky_mode_timer], 0
@@ -5252,9 +5468,9 @@ run_game proc near
     call maze_to_screen_inky
     
     ; Initialize Clyde
-    mov byte ptr [clyde_in_ghost_house], 0
+    mov byte ptr [clyde_in_ghost_house], 1
     mov word ptr [clyde_exit_timer], 0
-    mov byte ptr [clyde_maze_x], 13
+    mov byte ptr [clyde_maze_x], 10
     mov byte ptr [clyde_maze_y], 9
     mov byte ptr [clyde_direction], 4
     mov byte ptr [clyde_mode], 0
@@ -5273,7 +5489,8 @@ run_game proc near
     mov byte ptr [blinky_maze_y], 7
     mov byte ptr [blinky_direction], 4
     call maze_to_screen_blinky
-    
+    call load_all_ghost_sprites
+
     push ax
     push cx
     push di
@@ -5296,7 +5513,8 @@ run_game proc near
     
     call draw_player_improved
     call draw_all_ghosts
-    call check_coin_collision	
+    call check_coin_collision
+    
 game_loop:
     call restore_background
     
@@ -5308,26 +5526,27 @@ game_loop:
     call check_input
     
     call update_blinky
-	call update_pinky
-	call update_inky
-	call update_clyde
+    call update_pinky
+    call update_inky
+    call update_clyde
     
+	call check_ghost_overlap
+	
     call check_player_blinky_collision
     cmp al, 1
     je game_over
-	
-	call check_player_inky_collision
-	cmp al, 1
-	je game_over
-	
-	call check_player_pinky_collision
-	cmp al, 1
-	je game_over
-	
-	call check_player_clyde_collision
-	cmp al, 1
-	je game_over
-
+    
+    call check_player_inky_collision
+    cmp al, 1
+    je game_over
+    
+    call check_player_pinky_collision
+    cmp al, 1
+    je game_over
+    
+    call check_player_clyde_collision
+    cmp al, 1
+    je game_over
     
     call check_coin_collision
     
@@ -5339,21 +5558,12 @@ game_loop:
     
     call display_score
     
-    mov cx, 1
-delay_loop:
-    push cx
-    mov cx, 2
-inner_delay:
-    loop inner_delay
-    pop cx
-    loop delay_loop
-    
     call vsync
     
     jmp game_loop
     
 game_over:
-	call game_over_menu
+    call game_over_menu
     ret
 run_game endp
 
