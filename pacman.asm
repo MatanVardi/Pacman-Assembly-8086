@@ -268,7 +268,6 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
     pinky_sprite_data db 144 dup(?)
     inky_sprite_data db 144 dup(?)
     clyde_sprite_data db 144 dup(?)
-			
 
 			
 			
@@ -2610,7 +2609,6 @@ exit2:
 handle_game_over_menu endp
 
 
-
 draw_all_ghosts proc near
     push ax
     push bx
@@ -2625,10 +2623,6 @@ draw_all_ghosts proc near
     pop ax
     ret
 draw_all_ghosts endp
-
-
-
-
 
 ;-----------------------------------------------------
 ; maze_to_screen_blinky - Converts Blinky's maze coordinates to screen pixels
@@ -3745,12 +3739,6 @@ test_current_direction:
     cmp cl, 1
     jne choose_new_direction    ; Blocked by wall, need new direction
     
-    ; Also check if another ghost is in the way
-    mov cl, 2                   ; Ghost ID for Pinky
-    call is_position_occupied_by_ghost
-    cmp dl, 1
-    je choose_new_direction     ; Blocked by ghost, need new direction
-    
     ; Can continue current direction - update position
     mov al, [pinky_direction]
     cmp al, 1                   ; Was up?
@@ -3776,7 +3764,45 @@ continue_not_left:
     jmp finalize_movement
     
 choose_new_direction:
-    ; [... existing code ...]
+    ; Calculate differences to target
+    mov al, [pinky_target_x]
+    sub al, dl                  ; AL = signed X difference
+    mov bl, al                  ; Save signed X diff
+    jns x_positive
+    neg al                      ; Make absolute
+x_positive:
+    
+    mov ah, [pinky_target_y]
+    sub ah, dh                  ; AH = signed Y difference
+    mov bh, ah                  ; Save signed Y diff
+    jns y_positive
+    neg ah                      ; Make absolute
+y_positive:
+    
+    ; Choose primary movement axis
+    cmp al, ah                  ; Compare |x_diff| with |y_diff|
+    jb try_vertical_first       ; |x_diff| < |y_diff|
+    je choose_random            ; Equal differences
+    
+    ; Try horizontal first (larger X difference)
+    cmp bl, 0
+    jl try_left                 ; Target is left
+    jg try_right                ; Target is right
+    jmp try_vertical_first      ; Same X, try vertical
+    
+choose_random:
+    ; Use system timer for randomness
+    mov ah, 0
+    int 1Ah                     ; Get system time
+    test dl, 1                  ; Test lowest bit
+    jz try_horizontal           ; Even = horizontal
+    jmp try_vertical_first      ; Odd = vertical
+    
+try_horizontal:
+    cmp bl, 0
+    jl try_left                 ; Target is left
+    jg try_right                ; Target is right
+    jmp try_vertical_first      ; Same X, try vertical
     
 try_right:
     ; Don't reverse from left
@@ -3791,12 +3817,6 @@ try_right:
     cmp cl, 1
     jne try_left                ; Can't go right due to wall
     
-    ; Check for ghost collision
-    mov cl, 2                   ; Ghost ID for Pinky
-    call is_position_occupied_by_ghost
-    cmp dl, 1
-    je try_left                 ; Can't go right due to ghost
-    
     ; Move right
     mov byte ptr [pinky_direction], 4
     inc byte ptr [pinky_maze_x]
@@ -3804,7 +3824,7 @@ try_right:
     
 try_left:
     ; Don't reverse from right
-    cmp [pinky_direction], 4    ; Was going right?
+    cmp cl, 4                   ; Was going right?
     je try_vertical_first       ; Don't reverse
     
     ; Test moving left
@@ -3815,17 +3835,10 @@ try_left:
     cmp cl, 1
     jne try_vertical_first      ; Can't go left due to wall
     
-    ; Check for ghost collision
-    mov cl, 2                   ; Ghost ID for Pinky
-    call is_position_occupied_by_ghost
-    cmp dl, 1
-    je try_vertical_first       ; Can't go left due to ghost
-    
     ; Move left
     mov byte ptr [pinky_direction], 3
     dec byte ptr [pinky_maze_x]
     jmp finalize_movement
-
     
 try_vertical_first:
     ; Try vertical movement
@@ -3854,7 +3867,7 @@ try_down:
     
 try_up:
     ; Don't reverse from down
-    cmp [pinky_direction], 2    ; Was going down?
+    cmp cl, 2                   ; Was going down?
     je try_any                  ; Don't reverse
     
     ; Test moving up
@@ -3873,7 +3886,7 @@ try_up:
 try_any:
     ; Try any valid direction
     ; First try up if not coming from down
-    cmp [pinky_direction], 2    ; Coming from down?
+    cmp cl, 2                   ; Coming from down?
     je skip_try_up              ; Skip opposite direction
     
     mov al, dl
@@ -3890,7 +3903,7 @@ try_any:
     
 skip_try_up:
     ; Try down if not coming from up
-    cmp [pinky_direction], 1    ; Coming from up?
+    cmp cl, 1                   ; Coming from up?
     je skip_try_down            ; Skip opposite direction
     
     mov al, dl
@@ -3907,7 +3920,7 @@ skip_try_up:
     
 skip_try_down:
     ; Try left if not coming from right
-    cmp [pinky_direction], 4    ; Coming from right?
+    cmp cl, 4                   ; Coming from right?
     je skip_try_left            ; Skip opposite direction
     
     mov al, dl
@@ -3924,7 +3937,7 @@ skip_try_down:
     
 skip_try_left:
     ; Try right if not coming from left
-    cmp [pinky_direction], 3    ; Coming from left?
+    cmp cl, 3                   ; Coming from left?
     je no_valid_moves           ; Skip opposite direction
     
     mov al, dl
@@ -4527,7 +4540,6 @@ move_inky_toward_target proc near
     pop ax
     ret
 move_inky_toward_target endp
-
 
 ;-----------------------------------------------------
 ; check_player_inky_collision - Collision detection
@@ -5362,102 +5374,6 @@ exit_ghost_house_inky proc near
 exit_ghost_house_inky endp
 
 
-
-;-----------------------------------------------------
-; is_position_occupied_by_ghost - Checks if a position is occupied by another ghost
-; Input: AL = X position, BH = Y position, CL = Ghost ID (1=Blinky, 2=Pinky, etc.)
-; Output: DL = 1 if position is occupied by another ghost, 0 if free
-;-----------------------------------------------------
-;-----------------------------------------------------
-; is_position_occupied_by_ghost - With deadlock detection
-;-----------------------------------------------------
-is_position_occupied_by_ghost proc near
-    push ax
-    push bx
-    push cx
-    
-    ; Default: position is not occupied
-    mov dl, 0
-    
-    ; Skip self-check based on ghost ID
-    cmp cl, 1                    ; Is this Blinky?
-    je @skip_blinky_check
-    
-    ; Check if Blinky is at this position
-    cmp al, [blinky_maze_x]
-    jne @skip_blinky_check
-    cmp bh, [blinky_maze_y]
-    jne @skip_blinky_check
-    
-    ; Deadlock detection: Check if attempting to pass vertically
-    ; If Blinky and Pinky are in adjacent vertical positions, allow passing
-    ; to prevent deadlock
-    
-    ; Calculate Y difference between ghosts
-    push ax
-    mov al, [blinky_maze_y]
-    sub al, [pinky_maze_y]
-    ; If abs(y_diff) == 1, ghosts are vertically adjacent
-    cmp al, 1
-    je @allow_passing
-    cmp al, -1
-    je @allow_passing
-    pop ax
-    
-    ; Position is occupied by Blinky
-    mov dl, 1
-    jmp @exit_check
-    
-@allow_passing:
-    pop ax
-    mov dl, 0
-    jmp @exit_check
-    
-@skip_blinky_check:
-    ; Similar checks for Pinky...
-    
-@exit_check:
-    pop cx
-    pop bx
-    pop ax
-    ret
-is_position_occupied_by_ghost endp
-
-;-----------------------------------------------------
-; check_ghost_overlap - Checks if ghosts are overlapping
-; Returns AL = 1 if overlapping, 0 if not
-;-----------------------------------------------------
-check_ghost_overlap proc near
-    push bx
-    push cx
-    push dx
-    
-    ; Check if Blinky and Pinky are at the same position
-    mov al, [blinky_maze_x]
-    mov bl, [pinky_maze_x]
-    cmp al, bl
-    jne @no_overlap
-    
-    mov al, [blinky_maze_y]
-    mov bl, [pinky_maze_y]
-    cmp al, bl
-    jne @no_overlap
-    
-	
-    ; Ghosts are at the same position
-    mov al, 1
-    jmp @exit_proc
-    
-@no_overlap:
-    mov al, 0
-    
-@exit_proc2:
-    pop dx
-    pop cx
-    pop bx
-    ret
-check_ghost_overlap endp
-
 ;-----------------------------------------------------
 ; exit_and_cls - Exits to DOS and clears screen
 ;-----------------------------------------------------
@@ -5552,6 +5468,7 @@ run_game proc near
     call check_coin_collision
     
 game_loop:
+
     call restore_background
     
     mov ax, [player_x_pos]
@@ -5566,7 +5483,6 @@ game_loop:
     call update_inky
     call update_clyde
     
-	call check_ghost_overlap
 	
    ; call check_player_blinky_collision
     ;cmp al, 1
