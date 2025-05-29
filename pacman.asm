@@ -28,6 +28,9 @@ INFO_FILE_IN equ 'info.bmp'
 TUTORIAL_FILE_IN equ 'tutorial.bmp'
 WON_FILE_IN equ 'win.bmp'
 
+PACMAN_DEATH_FILE1
+
+
 SCREEN_WIDTH equ 320  
 SCREEN_HEIGHT equ 200
 
@@ -164,6 +167,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	; === Player State Variables ===
 	current_direction db 0      ; 0=stopped, 1=up, 2=down, 3=left, 4=right
 	player_bg_buffer db 12*12 dup (0)  ; Background save area for clean sprite erasing
+	player_lives dw 2		
 
 	; === Wall Rendering Settings ===  
 	wall_corner_radius dw 2     ; Radius in pixels for rounded wall corners
@@ -269,7 +273,6 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
     inky_sprite_data db 144 dup(?)
     clyde_sprite_data db 144 dup(?)
 
-			
 			
 		
 		
@@ -5374,6 +5377,131 @@ exit_ghost_house_inky proc near
 exit_ghost_house_inky endp
 
 
+
+reset_all_ghosts proc near
+    ; === Clear old ghost sprites first ===
+    call clear_all_ghost_sprites
+    
+    ; Initialize Pinky (exactly like in run_game)
+    mov byte ptr [pinky_in_ghost_house], 1
+    mov word ptr [pinky_exit_timer], 0
+    mov byte ptr [pinky_maze_x], 9
+    mov byte ptr [pinky_maze_y], 9
+    mov byte ptr [pinky_direction], 4
+    mov byte ptr [pinky_mode], 0               ; Add missing initialization
+    mov word ptr [pinky_mode_timer], 0         ; Add missing initialization
+    mov byte ptr [pinky_target_x], 0           ; Add missing initialization
+    mov byte ptr [pinky_target_y], 0           ; Add missing initialization
+    mov byte ptr [pinky_move_counter], 0       ; Add missing initialization
+    call maze_to_screen_pinky
+    
+    ; Initialize Inky (exactly like in run_game)
+    mov byte ptr [inky_in_ghost_house], 1
+    mov word ptr [inky_exit_timer], 0
+    mov byte ptr [inky_maze_x], 11
+    mov byte ptr [inky_maze_y], 9 
+    mov byte ptr [inky_direction], 4
+    mov byte ptr [inky_mode], 0
+    mov word ptr [inky_mode_timer], 0
+    mov byte ptr [inky_target_x], 20
+    mov byte ptr [inky_target_y], 20
+    mov byte ptr [inky_move_counter], 0
+    call maze_to_screen_inky
+    
+    ; Initialize Clyde (exactly like in run_game)
+    mov byte ptr [clyde_in_ghost_house], 1
+    mov word ptr [clyde_exit_timer], 0
+    mov byte ptr [clyde_maze_x], 10              ; Note: 10, not 7!
+    mov byte ptr [clyde_maze_y], 9
+    mov byte ptr [clyde_direction], 4
+    mov byte ptr [clyde_mode], 0
+    mov word ptr [clyde_mode_timer], 0
+    mov byte ptr [clyde_target_x], 0
+    mov byte ptr [clyde_target_y], 20
+    mov byte ptr [clyde_move_counter], 0
+    call maze_to_screen_clyde
+    
+    ; Initialize Blinky (exactly like in run_game)
+    mov word ptr [blinky_draw_mode], 0
+    mov word ptr [blinky_mode_timer], 0
+    mov byte ptr [blinky_mode], 0
+    mov byte ptr [blinky_maze_x], 9
+    mov byte ptr [blinky_maze_y], 7
+    mov byte ptr [blinky_direction], 4
+    mov byte ptr [blinky_target_x], 20          ; Add missing initialization
+    mov byte ptr [blinky_target_y], 0           ; Add missing initialization
+    mov byte ptr [blinky_move_counter], 0       ; Add missing initialization
+    call maze_to_screen_blinky
+
+    ret
+reset_all_ghosts endp
+
+; This procedure clears ghost traces by redrawing the background
+clear_all_ghost_sprites proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    
+    ; Method 2: If you want to be more precise, clear specific areas
+    ; Clear Blinky area with black pixels
+    mov ax, blinky_x_pos
+    mov BmpLeft, ax
+    mov ax, blinky_y_pos
+    mov BmpTop, ax
+    call restore_blinky_background
+    
+    ; Clear Pinky area  
+    mov ax, pinky_x_pos
+    mov BmpLeft, ax
+    mov ax, pinky_y_pos
+    mov BmpTop, ax
+    call restore_pinky_background
+    
+    ; Clear Inky area
+    mov ax, inky_x_pos
+    mov BmpLeft, ax
+    mov ax, inky_y_pos
+    mov BmpTop, ax
+    call restore_inky_background
+    
+    ; Clear Clyde area
+    mov ax, clyde_x_pos
+    mov BmpLeft, ax
+    mov ax, clyde_y_pos
+    mov BmpTop, ax
+    call restore_clyde_background
+    
+    ; Redraw maze and coins again to ensure clean background
+    call DrawMaze
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+clear_all_ghost_sprites endp
+
+
+respawn_player proc near
+    ; Reset player position
+    mov player_x_pos, 155
+    mov player_y_pos, 138
+    
+    ; Reset ghosts to starting positions
+    call reset_all_ghosts
+    
+    ; Maybe add a brief pause
+    mov cx, 30
+    respawn_delay:
+        call vsync
+        loop respawn_delay
+    
+    ret
+respawn_player endp
+
+
 ;-----------------------------------------------------
 ; exit_and_cls - Exits to DOS and clears screen
 ;-----------------------------------------------------
@@ -5484,21 +5612,21 @@ game_loop:
     call update_clyde
     
 	
-   ; call check_player_blinky_collision
-    ;cmp al, 1
-    ;je game_over
+    call check_player_blinky_collision
+    cmp al, 1
+    je is_game_over
     
-    ;call check_player_inky_collision
-    ;cmp al, 1
-    ;je game_over
+    call check_player_inky_collision
+    cmp al, 1
+    je is_game_over
     
-   ; call check_player_pinky_collision
-    ;cmp al, 1
-   ; je game_over
+    call check_player_pinky_collision
+    cmp al, 1
+    je is_game_over
     
-   ; call check_player_clyde_collision
-    ;cmp al, 1
-   ; je game_over
+    call check_player_clyde_collision
+    cmp al, 1
+    je is_game_over
     
     call check_coin_collision
     
@@ -5518,9 +5646,39 @@ game_loop:
     
     jmp game_loop
     
+is_game_over:
+    cmp player_lives, 0
+    je game_over
+    dec player_lives
+    
+    ; Reset player position
+    mov player_x_pos, 155       ; Your starting X
+    mov player_y_pos, 138       ; Your starting Y
+    
+    ; Reset all ghosts to starting positions
+    call reset_all_ghosts
+    
+    ; Optional: brief pause for respawn effect
+    mov cx, 30
+    respawn_delay2:
+        call vsync
+        loop respawn_delay2
+    
+    jmp game_loop              ; Continue the game
+
+	
 game_over:
-    call handle_game_over_menu
-    ret
+	mov player_lives, 2
+	call play_pacman_death_animation
+
+    mov cx, 30
+    respawn_delay3:
+        call vsync
+        loop respawn_delay3
+    
+    jmp game_loop              ; Continue the game
+	call handle_game_over_menu
+	ret
 win:
 	call handle_win_page
 	ret
