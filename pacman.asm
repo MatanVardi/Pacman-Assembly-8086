@@ -18,7 +18,7 @@ PAC_RIGHT2_FILE equ 'right2.bmp'
 PAC_DEFAULT_FILE equ 'default.bmp'
 BLINKY_FILE_NAME equ 'blinky.bmp'
 BLINKY_FILE_NAME2 equ 'blinky3.bmp'
-PINKY_FILE_NAME equ 'pinky2.bmp'
+PINKY_FILE_NAME equ 'pinky.bmp'
 INKY_FILE_NAME equ 'inky.bmp'
 PAFILE_NAME_IN equ 'pause2.bmp'
 MENU_FILE_IN equ 'menu.bmp'
@@ -28,7 +28,15 @@ INFO_FILE_IN equ 'info.bmp'
 TUTORIAL_FILE_IN equ 'tutorial.bmp'
 WON_FILE_IN equ 'win.bmp'
 
-PACMAN_DEATH_FILE1
+PACMAN_DEATH_FILE1 equ 'Pdeath1.bmp'
+PACMAN_DEATH_FILE2 equ 'Pdeath2.bmp'
+PACMAN_DEATH_FILE3 equ 'Pdeath3.bmp'
+PACMAN_DEATH_FILE4 equ 'Pdeath4.bmp'
+PACMAN_DEATH_FILE5 equ 'Pdeath5.bmp'
+PACMAN_DEATH_FILE6 equ 'Pdeath6.bmp'
+PACMAN_DEATH_FILE7 equ 'Pdeath7.bmp'
+PACMAN_DEATH_FILE8 equ 'Pdeath8.bmp'
+
 
 
 SCREEN_WIDTH equ 320  
@@ -67,7 +75,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
             db 0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0
 	; my score text that updates
 	score_text db 'Score: $'  ; String to display before score ($ is terminator)
-
+	lives_text db 'Remaining Lives: $'
 	;2d array of coins in map (position in converted in DrawCoins)
 	little_coins_map db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; Row 0 (all zeros - top edge)
 				   db 0,0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,0  ; Row 1
@@ -137,7 +145,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
     player_y_pos dw 138
 	
 	; Null-terminated filename strings for file operations
-	; Converts the constants into strings that DOS file functions can use
+	
 	PacUp1FileName db PAC_UP1_FILE, 0
 	PacUp2FileName db PAC_UP2_FILE, 0
 	PacDown1FileName db PAC_DOWN1_FILE, 0
@@ -147,6 +155,15 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	PacRight1FileName db PAC_RIGHT1_FILE, 0
 	PacRight2FileName db PAC_RIGHT2_FILE, 0
 	PacDefaultFileName db PAC_DEFAULT_FILE, 0
+	PacDeathFile1 db PACMAN_DEATH_FILE1, 0
+	PacDeathFile2 db PACMAN_DEATH_FILE2, 0
+	PacDeathFile3 db PACMAN_DEATH_FILE3, 0
+	PacDeathFile4 db PACMAN_DEATH_FILE4, 0
+	PacDeathFile5 db PACMAN_DEATH_FILE5, 0
+	PacDeathFile6 db PACMAN_DEATH_FILE6, 0
+	PacDeathFile7 db PACMAN_DEATH_FILE7, 0
+	PacDeathFile8 db PACMAN_DEATH_FILE8, 0
+
 	BlinkyFileName db BLINKY_FILE_NAME, 0
 	BlinkyFileName2 db BLINKY_FILE_NAME2, 0
 	PinkyFileName db PINKY_FILE_NAME, 0
@@ -167,7 +184,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	; === Player State Variables ===
 	current_direction db 0      ; 0=stopped, 1=up, 2=down, 3=left, 4=right
 	player_bg_buffer db 12*12 dup (0)  ; Background save area for clean sprite erasing
-	player_lives dw 2		
+	player_lives dw 3		
 
 	; === Wall Rendering Settings ===  
 	wall_corner_radius dw 2     ; Radius in pixels for rounded wall corners
@@ -1131,6 +1148,36 @@ display_score proc near
     pop ax
     ret
 display_score endp
+
+display_lives proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Position for score display (top-left corner)
+    mov ah, 02h      ; Set cursor position
+    mov bh, 0       ; Page number
+    mov dh, 24       ; Row 24 (bottom row - screen is 25 rows 0-24)
+    mov dl, 0        ; Column 0 (left)
+    int 10h
+    
+    ; Display the text
+    mov ah, 09h      ; Display string function
+    mov dx, offset lives_text
+    int 21h
+    
+    ; Convert score to ASCII and display
+    mov ax, [player_lives]
+    call display_number
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+display_lives endp
+
 
 ;-----------------------------------------------------
 ; display_number - Converts number in AX to decimal and displays it on screen
@@ -5475,7 +5522,7 @@ clear_all_ghost_sprites proc near
     
     ; Redraw maze and coins again to ensure clean background
     call DrawMaze
-    
+	
     pop dx
     pop cx
     pop bx
@@ -5501,6 +5548,104 @@ respawn_player proc near
     ret
 respawn_player endp
 
+play_pacman_death_animation proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    ; Stop all game movement during animation
+    mov byte ptr [current_direction], 0
+    mov byte ptr [is_moving], 0
+    
+    ; Clear all ghosts from screen FIRST
+    call clear_all_ghost_sprites
+    call display_score
+	mov player_lives, 0
+    call display_lives  ; Assuming you have this procedure
+
+    ; Set up drawing parameters for Pacman
+    mov ax, [player_x_pos]
+    mov [BmpLeft], ax
+    mov ax, [player_y_pos]
+    mov [BmpTop], ax
+    mov [BmpWidth], 12
+    mov [BmpHeight], 12
+    
+    ; Make sure player area is clear to start
+    call save_background
+    call restore_background
+    
+    ; Add a short pause before starting the animation
+    mov cx, 30
+    pre_anim_delay:
+        call vsync
+        loop pre_anim_delay
+    
+    ; === ANIMATION SEQUENCE ===
+    
+    ; Frame 1
+    mov dx, offset PacDeathFile1
+    call OpenShowBmpTransparent
+    call delay_death_frame
+    call restore_background
+    
+    ; Frame 2
+    mov dx, offset PacDeathFile2
+    call OpenShowBmpTransparent
+    call delay_death_frame
+    call restore_background
+    
+    ; Frame 3
+    mov dx, offset PacDeathFile3
+    call OpenShowBmpTransparent
+    call delay_death_frame
+    call restore_background
+    
+    ; Frame 4
+    mov dx, offset PacDeathFile4
+    call OpenShowBmpTransparent
+    call delay_death_frame
+    call restore_background
+    
+    ; Frame 5
+    mov dx, offset PacDeathFile5
+    call OpenShowBmpTransparent
+    call delay_death_frame
+    call restore_background
+    
+    ; Frame 6
+    mov dx, offset PacDeathFile6
+    call OpenShowBmpTransparent
+    call delay_death_frame
+    call restore_background
+    
+    ; Frame 7
+    mov dx, offset PacDeathFile7
+    call OpenShowBmpTransparent
+    call delay_death_frame
+    call restore_background
+    
+    ; Frame 8 (final frame)
+    mov dx, offset PacDeathFile8
+    call OpenShowBmpTransparent
+    call delay_death_frame_long
+    call restore_background
+    
+    ; Add a final pause after animation completes
+    mov cx, 60
+    post_anim_delay:
+        call vsync
+        loop post_anim_delay
+    
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+play_pacman_death_animation endp
+
+
 
 ;-----------------------------------------------------
 ; exit_and_cls - Exits to DOS and clears screen
@@ -5511,6 +5656,26 @@ exit_and_cls proc near
     int 21h           ; Call DOS
     ret               ; This will never execute
 exit_and_cls endp
+
+delay_death_frame proc near
+    push cx
+    mov cx, 25      ; Reduce from 80 to 25 for faster animation
+    delay_loop:
+        call vsync
+        loop delay_loop
+    pop cx
+    ret
+delay_death_frame endp
+
+delay_death_frame_long proc near
+    push cx
+    mov cx, 50      ; Reduce from 120 to 50 for the final frame
+    delay_loop_long:
+        call vsync
+        loop delay_loop_long
+    pop cx
+    ret
+delay_death_frame_long endp
 
 
 ;-----------------------------------------------------
@@ -5637,6 +5802,7 @@ game_loop:
     call draw_all_ghosts
     
     call display_score
+	call display_lives
 	
 	cmp [current_score], 1760
 
@@ -5647,7 +5813,7 @@ game_loop:
     jmp game_loop
     
 is_game_over:
-    cmp player_lives, 0
+    cmp player_lives, 1
     je game_over
     dec player_lives
     
@@ -5668,17 +5834,22 @@ is_game_over:
 
 	
 game_over:
-	mov player_lives, 2
-	call play_pacman_death_animation
-
-    mov cx, 30
-    respawn_delay3:
-        call vsync
-        loop respawn_delay3
+    ; Play death animation when all lives are exhausted
+    call play_pacman_death_animation
     
-    jmp game_loop              ; Continue the game
-	call handle_game_over_menu
-	ret
+    ; Additional delay after animation completes
+    ; This ensures the final death frame stays visible
+    mov cx, 60
+    post_animation_delay:
+        call vsync
+        loop post_animation_delay
+    
+    ; Reset lives for next game
+    mov player_lives, 3
+    
+    ; Go to game over menu
+    call handle_game_over_menu
+    ret
 win:
 	call handle_win_page
 	ret

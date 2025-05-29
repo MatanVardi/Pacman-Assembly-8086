@@ -1,9 +1,9 @@
 
  Start  Stop   Length Name               Class
 
- 00000H 01DF6H 01DF7H PACMAN_TEXT        CODE
- 01E00H 035EDH 017EEH _DATA              DATA
- 035F0H 045EFH 01000H STACK              STACK
+ 00000H 02021H 02022H PACMAN_TEXT        CODE
+ 02030H 03890H 01861H _DATA              DATA
+ 038A0H 0489FH 01000H STACK              STACK
 
-Program entry point at 0000:1DE9
+Program entry point at 0000:2014
 
