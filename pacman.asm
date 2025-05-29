@@ -2622,9 +2622,10 @@ pause_loop:
     mov ah, 00h
     int 16h
     
+    cmp al, "T"
+    je exit
     cmp al, "t"
     je exit
-    
     cmp al, 1Bh   ; ESC pressed?
     jne pause_loop
     
@@ -2907,60 +2908,57 @@ save_clyde_background endp
 ;-----------------------------------------------------
 ; restore_blinky_background - Restores saved background to erase Blinky
 ;-----------------------------------------------------
-x_pos_ghost equ [bp + 4]
-y_pos_ghost equ [bp + 6]
-ghost_bg_buffer equ [bp + 8]
-
 restore_ghost_background proc near
-	push bp
-	mov bp, sp
+    push bp
+    mov bp, sp
     push ax
     push bx
     push cx
     push dx
     push si
     push di
+    push es
     
     ; Set video memory segment
     mov ax, 0A000h
     mov es, ax
     
-    ; Calculate screen position: pos = y * 320 + x
+    ; Calculate screen position
     mov ax, 320            
-    mul word ptr [y_pos_ghost]     
-    add ax, [x_pos_ghost] 
-    mov di, ax             ; Destination index in video memory
+    mul word ptr [bp+6]     ; Y position parameter
+    add ax, [bp+4]          ; X position parameter
+    mov di, ax              ; Destination in video memory
     
-    ; Point to our background buffer
-    mov si, offset ghost_bg_buffer
+    ; Get buffer pointer from parameter
+    mov si, [bp+8]          ; Buffer pointer parameter
     
     ; Restore 12x12 pixel area
-    mov cx, 12             ; Height in pixels
-@restore_row:
+    mov cx, 12
+restore_row:
     push cx
     push di
     
-    mov cx, 12             ; Width in pixels
-@restore_col:
-    mov al, [si]           ; Get pixel from buffer
-    mov es:[di], al        ; Restore to screen
-    inc si                 ; Next buffer pixel
-    inc di                 ; Next screen position
-    loop @restore_col
+    mov cx, 12
+restore_col:
+    mov al, [si]
+    mov es:[di], al
+    inc si
+    inc di
+    loop restore_col
     
     pop di
-    add di, 320            ; Move to next screen row
+    add di, 320
     pop cx
-    dec cx
-    jnz @restore_row
+    loop restore_row
     
+    pop es
     pop di
     pop si
     pop dx
     pop cx
     pop bx
     pop ax
-	pop bp
+    pop bp
     ret 6                   ; Clear 6 bytes of parameters
 restore_ghost_background endp
 
@@ -3192,6 +3190,9 @@ set_blinky_chase_target endp
 ;-----------------------------------------------------
 ; move_blinky_toward_target - Improved pathfinding with balanced behavior
 ;-----------------------------------------------------
+;-----------------------------------------------------
+; move_blinky_toward_target - Improved pathfinding with balanced behavior
+;-----------------------------------------------------
 move_blinky_toward_target proc near
     push ax
     push bx
@@ -3242,24 +3243,24 @@ blinky_test_current:
     cmp al, 1                   ; Was up?
     jne blinky_continue_not_up
     dec byte ptr [blinky_maze_y]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_continue_not_up:
     cmp al, 2                   ; Was down?
     jne blinky_continue_not_down
     inc byte ptr [blinky_maze_y]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_continue_not_down:
     cmp al, 3                   ; Was left?
     jne blinky_continue_not_left
     dec byte ptr [blinky_maze_x]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_continue_not_left:
     ; Must be right
     inc byte ptr [blinky_maze_x]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_choose_new_direction:
     ; STEP 2: Can't continue current direction - choose new one toward target
@@ -3322,7 +3323,7 @@ blinky_try_right:
     ; Move right
     mov byte ptr [blinky_direction], 4
     inc byte ptr [blinky_maze_x]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_try_left:
     ; Don't reverse from right to left
@@ -3340,7 +3341,7 @@ blinky_try_left:
     ; Move left
     mov byte ptr [blinky_direction], 3
     dec byte ptr [blinky_maze_x]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_try_vertical:
     ; Try vertical movement
@@ -3365,7 +3366,7 @@ blinky_try_down:
     ; Move down
     mov byte ptr [blinky_direction], 2
     inc byte ptr [blinky_maze_y]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_try_up:
     ; Don't reverse from down to up
@@ -3383,39 +3384,36 @@ blinky_try_up:
     ; Move up
     mov byte ptr [blinky_direction], 1
     dec byte ptr [blinky_maze_y]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_try_any_direction:
     ; STEP 3: Emergency - try any valid direction except reverse
     mov si, 1                   ; Try directions 1,2,3,4
-    
 blinky_any_loop:
     cmp si, 5
-    jnge blinky_movement_isnt_done    ; No valid moves found
-	jmp blinky_movement_done
-blinky_movement_isnt_done:
+    jge before_blinky_no_valid_moves   ; No valid moves found (will still check tunnels after)
 
     ; Skip reverse directions
     mov al, [blinky_direction]
     cmp al, 1                   ; Was going up?
     jne blinky_not_up_reverse
     cmp si, 2                   ; Trying down?
-    je blinky_next_any_direction ; Skip reverse
+    je blinky_next_any_direction ; Skip reverse direction
 blinky_not_up_reverse:
     cmp al, 2                   ; Was going down?
     jne blinky_not_down_reverse
     cmp si, 1                   ; Trying up?
-    je blinky_next_any_direction ; Skip reverse
+    je blinky_next_any_direction ; Skip reverse direction
 blinky_not_down_reverse:
     cmp al, 3                   ; Was going left?
     jne blinky_not_left_reverse
     cmp si, 4                   ; Trying right?
-    je blinky_next_any_direction ; Skip reverse
+    je blinky_next_any_direction ; Skip reverse direction
 blinky_not_left_reverse:
     cmp al, 4                   ; Was going right?
     jne blinky_test_any_direction
     cmp si, 3                   ; Trying left?
-    je blinky_next_any_direction ; Skip reverse
+    je blinky_next_any_direction ; Skip reverse direction
     
 blinky_test_any_direction:
     ; Test direction SI
@@ -3426,7 +3424,8 @@ blinky_test_any_direction:
     jne blinky_test_down_any
     dec bh
     jmp blinky_check_any_valid
-    
+before_blinky_no_valid_moves:
+		jmp blinky_no_valid_moves
 blinky_test_down_any:
     cmp si, 2                   ; Down?
     jne blinky_test_left_any
@@ -3455,30 +3454,46 @@ blinky_check_any_valid:
     cmp si, 1                   ; Up?
     jne blinky_any_not_up
     dec byte ptr [blinky_maze_y]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_any_not_up:
     cmp si, 2                   ; Down?
     jne blinky_any_not_down
     inc byte ptr [blinky_maze_y]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_any_not_down:
     cmp si, 3                   ; Left?
     jne blinky_any_not_left
     dec byte ptr [blinky_maze_x]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_any_not_left:
     ; Must be right
     inc byte ptr [blinky_maze_x]
-    jmp blinky_movement_done
+    jmp blinky_tunnel_check
     
 blinky_next_any_direction:
     inc si
     jmp blinky_any_loop
+blinky_no_valid_moves:
+    ; No valid moves found, stay in place
+    ; Still continue to tunnel check!    
     
-blinky_movement_done:
+    
+blinky_tunnel_check:
+    ; Handle maze wrap-around (horizontal tunnels)
+    cmp byte ptr [blinky_maze_x], 0
+    jne blinky_check_right_tunnel
+    mov byte ptr [blinky_maze_x], 20   ; Wrap to right
+    jmp blinky_exit_proc
+    
+blinky_check_right_tunnel:
+    cmp byte ptr [blinky_maze_x], 20
+    jne blinky_exit_proc
+    mov byte ptr [blinky_maze_x], 0    ; Wrap to left
+    
+blinky_exit_proc:
     pop si
     pop dx
     pop cx
@@ -3486,6 +3501,7 @@ blinky_movement_done:
     pop ax
     ret
 move_blinky_toward_target endp
+
 
 ;-----------------------------------------------------
 ; check_player_blinky_collision - Checks if Pac-Man and Blinky sprites overlap
@@ -4307,6 +4323,9 @@ update_inky endp
 
 
 ;-----------------------------------------------------
+; move_inky_toward_target - Movement algorithm for Inky with improved tunnel handling
+;-----------------------------------------------------
+;-----------------------------------------------------
 ; move_inky_toward_target - Movement algorithm for Inky
 ;-----------------------------------------------------
 move_inky_toward_target proc near
@@ -4569,18 +4588,19 @@ move_inky_toward_target proc near
     
 @inky_no_valid_moves:
     ; No valid moves found, stay in place
+    ; Always fall through to tunnel check
     
 @inky_tunnel_check:
     ; Handle maze wrap-around (horizontal tunnels)
     cmp byte ptr [inky_maze_x], 0
     jne @inky_check_right_tunnel
-    mov byte ptr [inky_maze_x], 20   ; Wrap to right
+    mov byte ptr [inky_maze_x], 20   ; Wrap to right side of maze
     jmp @inky_exit_proc
     
 @inky_check_right_tunnel:
     cmp byte ptr [inky_maze_x], 20
     jne @inky_exit_proc
-    mov byte ptr [inky_maze_x], 0    ; Wrap to left
+    mov byte ptr [inky_maze_x], 0    ; Wrap to left side of maze
     
 @inky_exit_proc:
     pop si
@@ -4590,6 +4610,8 @@ move_inky_toward_target proc near
     pop ax
     ret
 move_inky_toward_target endp
+
+
 
 ;-----------------------------------------------------
 ; check_player_inky_collision - Collision detection
@@ -5771,11 +5793,11 @@ game_loop:
     
     call check_input
     
-    call update_blinky
-    call update_pinky
-    call update_inky
     call update_clyde
-    
+    call update_inky
+    call update_pinky
+    call update_blinky
+
 	
     call check_player_blinky_collision
     cmp al, 1
@@ -5851,6 +5873,7 @@ game_over:
     call handle_game_over_menu
     ret
 win:
+	mov player_lives, 3
 	call handle_win_page
 	ret
 run_game endp
