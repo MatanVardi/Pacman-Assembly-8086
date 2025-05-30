@@ -299,8 +299,10 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 ; SetGraphic - Set video mode to 13h (320x200, 256 colors)
 ;-----------------------------------------------------
 SetGraphic proc near
+	push ax
     mov ax, 13h
     int 10h
+	pop ax
     ret
 SetGraphic endp
 
@@ -308,8 +310,10 @@ SetGraphic endp
 ; ExitGraphic - Return to text mode
 ;-----------------------------------------------------
 ExitGraphic proc near
+	push ax
     mov ax, 3
     int 10h
+	pop ax
     ret
 ExitGraphic endp
 
@@ -2303,7 +2307,6 @@ check_player_move proc near
     push dx
     
     ; Save direction value
-    push ax
     
     ; Adjust position based on direction and check for wall
     cmp al, 1               ; Up
@@ -5870,12 +5873,7 @@ update_all_ghosts endp
 ;-----------------------------------------------------
 ; exit_and_cls - Exits to DOS and clears screen
 ;-----------------------------------------------------
-exit_and_cls proc near
-    call ExitGraphic  ; Return to text mode
-    mov ax, 4C00h     ; DOS exit function
-    int 21h           ; Call DOS
-    ret               ; This will never execute
-exit_and_cls endp
+
 
 delay_death_frame proc near
     push cx
@@ -5914,11 +5912,11 @@ delay_frame_v1 endp
 ;-----------------------------------------------------
 run_game proc near
     call SetGraphic
-    call DrawMaze
+    ;call DrawMaze
     
     ; Load all ghost sprites into memory BEFORE the game starts
     
-    call maze_to_screen_blinky
+    ;call maze_to_screen_blinky
     
     ; Initialize Pinky
     mov byte ptr [pinky_in_ghost_house], 1
@@ -5926,7 +5924,7 @@ run_game proc near
     mov byte ptr [pinky_maze_x], 9
     mov byte ptr [pinky_maze_y], 9
     mov byte ptr [pinky_direction], 4
-    call maze_to_screen_pinky
+    ;call maze_to_screen_pinky
     
     ; Initialize Inky
     mov byte ptr [inky_in_ghost_house], 1
@@ -5939,7 +5937,7 @@ run_game proc near
     mov byte ptr [inky_target_x], 20
     mov byte ptr [inky_target_y], 20
     mov byte ptr [inky_move_counter], 0
-    call maze_to_screen_inky
+    ;call maze_to_screen_inky
     
     ; Initialize Clyde
     mov byte ptr [clyde_in_ghost_house], 1
@@ -5952,7 +5950,7 @@ run_game proc near
     mov byte ptr [clyde_target_x], 0
     mov byte ptr [clyde_target_y], 20
     mov byte ptr [clyde_move_counter], 0
-    call maze_to_screen_clyde
+    ;call maze_to_screen_clyde
     
     ; Initialize Blinky
     mov word ptr [current_score], 0
@@ -5962,8 +5960,8 @@ run_game proc near
     mov byte ptr [blinky_maze_x], 9
     mov byte ptr [blinky_maze_y], 7
     mov byte ptr [blinky_direction], 4
-    call maze_to_screen_blinky
-    call load_all_ghost_sprites
+    ;call maze_to_screen_blinky
+    ;call load_all_ghost_sprites
 
     push ax
     push cx
@@ -5986,56 +5984,56 @@ run_game proc near
     pop cx
     pop ax
     
-    call DrawCoins
+    ;call DrawCoins
     
-    call draw_player_improved
-    call draw_all_ghosts
-    call check_coin_collision
+    ;call draw_player_improved
+    ;call draw_all_ghosts
+    ;call check_coin_collision
     
 game_loop:
-	call delay_frame_v1
-	call restore_background
-	call restore_all_ghosts_background
-    mov ax, [player_x_pos]
-    push ax
-    mov ax, [player_y_pos]
-    push ax
+	;call delay_frame_v1
+	;call restore_background
+	;call restore_all_ghosts_background
+    ;mov ax, [player_x_pos]
+    ;push ax
+   ; mov ax, [player_y_pos]
+   ; push ax
     
-    call check_input
-    call update_clyde
-    call update_inky
-    call update_pinky
-    call update_blinky
+     call check_input
+   ; call update_clyde
+  ;  call update_inky
+  ;  call update_pinky
+   ; call update_blinky
 	
-    call check_player_blinky_collision
-    cmp al, 1
-    je is_game_over
+   ; call check_player_blinky_collision
+    ;cmp al, 1
+    ;je is_game_over
     
-    call check_player_inky_collision
-    cmp al, 1
-    je is_game_over
+    ;call check_player_inky_collision
+    ;cmp al, 1
+    ;je is_game_over
     
-    call check_player_pinky_collision
-    cmp al, 1
-    je is_game_over
+    ;call check_player_pinky_collision
+    ;cmp al, 1
+    ;je is_game_over
     
-    call check_player_clyde_collision
-    cmp al, 1
-    je is_game_over
+   ; call check_player_clyde_collision
+    ;cmp al, 1
+    ;je is_game_over
     
-    call check_coin_collision
-    call update_animation
-	call save_background
-	call save_all_ghosts_background
-    call draw_player_improved
-    call draw_all_ghosts
-    call display_score
-	call display_lives
+    ;call check_coin_collision
+   ; call update_animation
+	;call save_background
+	;call save_all_ghosts_background
+   ; call draw_player_improved
+   ; call draw_all_ghosts
+   ; call display_score
+	;call display_lives
 	
-	cmp [current_score], 1760
-	je win
+	;cmp [current_score], 1760
+	;je win
 	
-    call vsync
+    ;call vsync
     
     jmp game_loop
     
@@ -6083,6 +6081,12 @@ win:
 	ret
 run_game endp
 
+exit_and_cls proc near
+    call ExitGraphic  ; Return to text mode
+    mov ax, 4C00h     ; DOS exit function
+    int 21h           ; Call DOS
+    ret               ; This will never execute
+exit_and_cls endp
 
 start:
    mov ax, @data
