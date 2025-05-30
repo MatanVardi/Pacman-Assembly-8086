@@ -2337,11 +2337,10 @@ check_right_direction:
 
 finish_check:
     ; Restore direction value
-    pop ax
-    
     pop dx
     pop bx
-    pop ax
+	pop ax
+
     ret
 check_player_move endp
 
@@ -5969,17 +5968,20 @@ run_game proc near
     push ax
     push cx
     push di
-    push es
-    
     push ds
+    push es
+
+    push ds        ; Copy DS to ES for stosb
     pop es
+
     mov cx, 21*21
     mov di, offset coins_collected
     mov al, 0
     cld
     rep stosb
-    
-    pop es
+
+    pop es         ; Restore original ES
+    pop ds         ; Restore original DS
     pop di
     pop cx
     pop ax
@@ -5992,7 +5994,7 @@ run_game proc near
     
 game_loop:
 	call delay_frame_v1
-    call restore_background
+	call restore_background
 	call restore_all_ghosts_background
     mov ax, [player_x_pos]
     push ax
