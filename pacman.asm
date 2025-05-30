@@ -177,10 +177,10 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	ClydeFileName db CLYDE_FILE_NAME, 0
 	
 	; Directions for Pacman
-	up dw 1
-	down dw 1
-	left dw 1
-	right dw 1
+	up dw 2
+	down dw 2
+	left dw 2
+	right dw 2
 	; === Player State Variables ===
 	current_direction db 0      ; 0=stopped, 1=up, 2=down, 3=left, 4=right
 	player_bg_buffer db 12*12 dup (0)  ; Background save area for clean sprite erasing
@@ -203,7 +203,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	; === Animation System ===
 	current_frame db 0          ; Animation frame: 0=mouth closed, 1=mouth open  
 	frame_counter db 8          ; Timer controlling animation speed
-	frame_delay db 15           ; Game cycles between frame changes
+	frame_delay db 13          ; Game cycles between frame changes
 	is_moving db 0              ; Movement flag: 0=stopped, 1=moving
 
 	; === Game State ===
@@ -220,7 +220,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	blinky_target_x db 20        ; Target maze X (top-right for scatter)
 	blinky_target_y db 0         ; Target maze Y (top-right for scatter)
 	blinky_move_counter db 0     ; Movement speed counter
-	blinky_move_delay db 12      ; Higher = slower ghost
+	blinky_move_delay db 5      ; Higher = slower ghost
 	blinky_bg_buffer db 12*12 dup(0) ; Background save buffer
 	blinky_mode_timer dw 0       ; Timer for mode switching
 	blinky_scatter_time dw 100   ; Time in scatter mode
@@ -238,7 +238,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	pinky_target_x db 0         ; Target maze X
 	pinky_target_y db 0         ; Target maze Y
 	pinky_move_counter db 0     ; Movement speed counter
-	pinky_move_delay db 16      ; Higher = slower ghost (slightly slower than Blinky)
+	pinky_move_delay db 9      ; Higher = slower ghost (slightly slower than Blinky)
 	pinky_bg_buffer db 12*12 dup(0) ; Background save buffer
 	pinky_mode_timer dw 0       ; Timer for mode switching
 	pinky_scatter_time dw 20    ; Time in scatter mode
@@ -277,7 +277,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
 	clyde_target_x db 0          ; Target maze X (bottom-left for scatter)
 	clyde_target_y db 20         ; Target maze Y (bottom-left for scatter)
 	clyde_move_counter db 0      ; Movement speed counter
-	clyde_move_delay db 18       ; Movement speed (slowest ghost)
+	clyde_move_delay db 16       ; Movement speed (slowest ghost)
 	clyde_scatter_time dw 20     ; Time in scatter mode
 	clyde_chase_time dw 300      ; Time in chase mode
 	clyde_bg_buffer db 12*12 dup(0) ; Background save buffer
@@ -290,9 +290,6 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
     inky_sprite_data db 144 dup(?)
     clyde_sprite_data db 144 dup(?)
 
-			
-		
-		
 		
 
 	
@@ -531,8 +528,7 @@ actually_wrap_left:
     
 @@y_ok:
     ; First, save the background
-    call save_background
-    
+   
     mov dx, offset PacDefaultFileName  ; Default sprite
     
     mov al, [current_direction]
@@ -2350,30 +2346,28 @@ finish_check:
 check_player_move endp
 
 
-;-----------------------------------------------------
-; vsync - Waits for vertical retrace for smooth animation
-;-----------------------------------------------------
 vsync proc near
     push ax
     push dx
     
     mov dx, 03DAh        ; VGA status port
     
-@@wait_retrace1:
+    ; Wait for retrace to end (if currently in retrace)
+@@wait_retrace_end:
     in al, dx
-    test al, 08h         ; Check if retrace is happening
-    jnz @@wait_retrace1  ; Wait for retrace to end
+    test al, 08h         ; Test bit 3 (vertical retrace) - FIXED: was 07h, should be 08h
+    jnz @@wait_retrace_end  ; Loop while in retrace
     
-@@wait_retrace2:
+    ; Now wait for retrace to start
+@@wait_retrace_start:
     in al, dx
-    test al, 08h         ; Wait for next retrace to start
-    jz @@wait_retrace2
+    test al, 08h         ; Test bit 3 (vertical retrace) - FIXED: was 07h, should be 08h
+    jz @@wait_retrace_start ; Loop until retrace starts
     
     pop dx
     pop ax
     ret
 vsync endp
-
 ;-----------------------------------------------------
 ; check_wall_collision - Converts pixel coordinates to grid and checks for walls
 ;-----------------------------------------------------
@@ -2801,20 +2795,14 @@ maze_to_screen_clyde endp
 ; save_ghost_background - Saves 12x12 area behind ghost for clean erasing
 ; Same technique as player background saving
 ;-----------------------------------------------------
-x_pos_ghost equ [bp + 4]
-y_pos_ghost equ [bp + 6]
-ghost_bg_buffer equ [bp + 8]
 
-save_ghost_background proc near
-    push bp
-    mov bp, sp
+save_blinky_background proc near
     push ax
     push bx
     push cx
     push dx
     push si
     push di
-    push ds
     push es
     
     ; Set video memory segment
@@ -2822,95 +2810,43 @@ save_ghost_background proc near
     mov es, ax
     
     ; Calculate screen position: pos = y * 320 + x
-    mov ax, 320            
-    mul word ptr [bp + 6]   ; Y position parameter
-    add ax, [bp + 4]        ; X position parameter
-    mov si, ax              ; Source index in video memory
+    mov ax, 320
+    mul word ptr [blinky_y_pos]
+    add ax, [blinky_x_pos]
+    mov si, ax
     
-    ; Point to our background buffer using DS:DI
-    mov di, [bp + 8]        ; Get buffer pointer
-    push ds                 ; Save DS
-    pop es                  ; ES = DS (for destination)
-    push 0A000h
-    pop ds                  ; DS = video memory
+    ; Set destination
+    mov di, offset blinky_bg_buffer
     
-    ; Save 12x12 pixel area
-    mov cx, 12              ; Height in pixels
-@save_row:
+    ; Save 12x12 background
+    mov cx, 12
+save_blinky_row:
     push cx
     push si
-    
-    mov cx, 12              ; Width in pixels
-@save_col:
-    mov al, ds:[si]         ; Get pixel from screen
-    mov es:[di], al         ; Store in buffer
-    inc si                  ; Next screen pixel
-    inc di                  ; Next buffer position
-    loop @save_col
-    
+    mov cx, 12
+save_blinky_col:
+    mov al, es:[si]
+    mov [di], al
+    inc si
+    inc di
+    loop save_blinky_col
     pop si
-    add si, 320             ; Move to next screen row
+    add si, 320
     pop cx
     dec cx
-    jnz @save_row
+    jnz save_blinky_row
     
-    ; Restore segments
     pop es
-    pop ds
     pop di
     pop si
     pop dx
     pop cx
     pop bx
     pop ax
-    pop bp
-    ret 6                   ; Clear 6 bytes of parameters
-save_ghost_background endp
-
-save_blinky_background proc near
-    push offset blinky_bg_buffer   ; Pointer to buffer
-    push word ptr [blinky_y_pos]   ; Y position
-    push word ptr [blinky_x_pos]   ; X position
-    call save_ghost_background
     ret
 save_blinky_background endp
 
-save_pinky_background proc near
-    push offset pinky_bg_buffer   ; Pointer to buffer
-    push word ptr [pinky_y_pos]   ; Y position
-    push word ptr [pinky_x_pos]   ; X position
-    call save_ghost_background
-    ret
-save_pinky_background endp
-
-;-----------------------------------------------------
-; save_inky_background - Saves background behind Inky
-;-----------------------------------------------------
-save_inky_background proc near
-    push offset inky_bg_buffer   ; Pointer to buffer
-    push word ptr [inky_y_pos]   ; Y position
-    push word ptr [inky_x_pos]   ; X position
-    call save_ghost_background
-    ret
-save_inky_background endp
-
-;-----------------------------------------------------
-; save_clyde_background - Saves background behind Clyde
-;-----------------------------------------------------
-save_clyde_background proc near
-    push offset clyde_bg_buffer   ; Pointer to buffer
-    push word ptr [clyde_y_pos]   ; Y position
-    push word ptr [clyde_x_pos]   ; X position
-    call save_ghost_background
-    ret
-save_clyde_background endp
-
-;-----------------------------------------------------
-; restore_blinky_background - Restores saved background to erase Blinky
-;-----------------------------------------------------
-restore_ghost_background proc near
-    push bp
-    mov bp, sp
+restore_blinky_background proc near
     push ax
     push bx
     push cx
@@ -2924,32 +2860,31 @@ restore_ghost_background proc near
     mov es, ax
     
     ; Calculate screen position
-    mov ax, 320            
-    mul word ptr [bp+6]     ; Y position parameter
-    add ax, [bp+4]          ; X position parameter
-    mov di, ax              ; Destination in video memory
+    mov ax, 320
+    mul word ptr [blinky_y_pos]
+    add ax, [blinky_x_pos]
+    mov di, ax
     
-    ; Get buffer pointer from parameter
-    mov si, [bp+8]          ; Buffer pointer parameter
+    ; Set source
+    mov si, offset blinky_bg_buffer
     
-    ; Restore 12x12 pixel area
+    ; Restore 12x12 background
     mov cx, 12
-restore_row:
+restore_blinky_row:
     push cx
     push di
-    
     mov cx, 12
-restore_col:
+restore_blinky_col:
     mov al, [si]
     mov es:[di], al
     inc si
     inc di
-    loop restore_col
-    
+    loop restore_blinky_col
     pop di
     add di, 320
     pop cx
-    loop restore_row
+    dec cx
+    jnz restore_blinky_row
     
     pop es
     pop di
@@ -2958,47 +2893,300 @@ restore_col:
     pop cx
     pop bx
     pop ax
-    pop bp
-    ret 6                   ; Clear 6 bytes of parameters
-restore_ghost_background endp
-
-restore_blinky_background proc near
-    push offset blinky_bg_buffer   ; Pointer to buffer
-    push word ptr [blinky_y_pos]   ; Y position
-    push word ptr [blinky_x_pos]   ; X position
-    call restore_ghost_background
     ret
 restore_blinky_background endp
 
+save_pinky_background proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    
+    mov ax, 0A000h
+    mov es, ax
+    
+    mov ax, 320
+    mul word ptr [pinky_y_pos]
+    add ax, [pinky_x_pos]
+    mov si, ax
+    
+    mov di, offset pinky_bg_buffer
+    
+    mov cx, 12
+save_pinky_row:
+    push cx
+    push si
+    mov cx, 12
+save_pinky_col:
+    mov al, es:[si]
+    mov [di], al
+    inc si
+    inc di
+    loop save_pinky_col
+    pop si
+    add si, 320
+    pop cx
+    dec cx
+    jnz save_pinky_row
+    
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+save_pinky_background endp
+
 restore_pinky_background proc near
-    push offset pinky_bg_buffer   ; Pointer to buffer
-    push word ptr [pinky_y_pos]   ; Y position
-    push word ptr [pinky_x_pos]   ; X position
-    call restore_ghost_background
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    
+    mov ax, 0A000h
+    mov es, ax
+    
+    mov ax, 320
+    mul word ptr [pinky_y_pos]
+    add ax, [pinky_x_pos]
+    mov di, ax
+    
+    mov si, offset pinky_bg_buffer
+    
+    mov cx, 12
+restore_pinky_row:
+    push cx
+    push di
+    mov cx, 12
+restore_pinky_col:
+    mov al, [si]
+    mov es:[di], al
+    inc si
+    inc di
+    loop restore_pinky_col
+    pop di
+    add di, 320
+    pop cx
+    dec cx
+    jnz restore_pinky_row
+    
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
     ret
 restore_pinky_background endp
 
-;-----------------------------------------------------
-; restore_inky_background - Restores background behind Inky
-;-----------------------------------------------------
+save_inky_background proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    
+    mov ax, 0A000h
+    mov es, ax
+    
+    mov ax, 320
+    mul word ptr [inky_y_pos]
+    add ax, [inky_x_pos]
+    mov si, ax
+    
+    mov di, offset inky_bg_buffer
+    
+    mov cx, 12
+save_inky_row:
+    push cx
+    push si
+    mov cx, 12
+save_inky_col:
+    mov al, es:[si]
+    mov [di], al
+    inc si
+    inc di
+    loop save_inky_col
+    pop si
+    add si, 320
+    pop cx
+    dec cx
+    jnz save_inky_row
+    
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+save_inky_background endp
+
 restore_inky_background proc near
-    push offset inky_bg_buffer   ; Pointer to buffer
-    push word ptr [inky_y_pos]   ; Y position
-    push word ptr [inky_x_pos]   ; X position
-    call restore_ghost_background
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    
+    mov ax, 0A000h
+    mov es, ax
+    
+    mov ax, 320
+    mul word ptr [inky_y_pos]
+    add ax, [inky_x_pos]
+    mov di, ax
+    
+    mov si, offset inky_bg_buffer
+    
+    mov cx, 12
+restore_inky_row:
+    push cx
+    push di
+    mov cx, 12
+restore_inky_col:
+    mov al, [si]
+    mov es:[di], al
+    inc si
+    inc di
+    loop restore_inky_col
+    pop di
+    add di, 320
+    pop cx
+    dec cx
+    jnz restore_inky_row
+    
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
     ret
 restore_inky_background endp
 
-;-----------------------------------------------------
-; restore_clyde_background - Restores background behind Clyde
-;-----------------------------------------------------
+save_clyde_background proc near
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    
+    mov ax, 0A000h
+    mov es, ax
+    
+    mov ax, 320
+    mul word ptr [clyde_y_pos]
+    add ax, [clyde_x_pos]
+    mov si, ax
+    
+    mov di, offset clyde_bg_buffer
+    
+    mov cx, 12
+save_clyde_row:
+    push cx
+    push si
+    mov cx, 12
+save_clyde_col:
+    mov al, es:[si]
+    mov [di], al
+    inc si
+    inc di
+    loop save_clyde_col
+    pop si
+    add si, 320
+    pop cx
+    dec cx
+    jnz save_clyde_row
+    
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+save_clyde_background endp
+
 restore_clyde_background proc near
-    push offset clyde_bg_buffer   ; Pointer to buffer
-    push word ptr [clyde_y_pos]   ; Y position
-    push word ptr [clyde_x_pos]   ; X position
-    call restore_ghost_background
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+    
+    mov ax, 0A000h
+    mov es, ax
+    
+    mov ax, 320
+    mul word ptr [clyde_y_pos]
+    add ax, [clyde_x_pos]
+    mov di, ax
+    
+    mov si, offset clyde_bg_buffer
+    
+    mov cx, 12
+restore_clyde_row:
+    push cx
+    push di
+    mov cx, 12
+restore_clyde_col:
+    mov al, [si]
+    mov es:[di], al
+    inc si
+    inc di
+    loop restore_clyde_col
+    pop di
+    add di, 320
+    pop cx
+    dec cx
+    jnz restore_clyde_row
+    
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
     ret
 restore_clyde_background endp
+
+save_all_ghosts_background proc near
+    call save_clyde_background
+    call save_inky_background
+    call save_pinky_background
+    call save_blinky_background
+    ret
+save_all_ghosts_background endp
+
+restore_all_ghosts_background proc near
+    call restore_clyde_background
+    call restore_inky_background
+    call restore_pinky_background
+    call restore_blinky_background
+    ret
+restore_all_ghosts_background endp
 
 ;-----------------------------------------------------
 ; is_valid_maze_position - Checks if a maze coordinate is walkable (not a wall)
@@ -3073,7 +3261,7 @@ update_blinky proc near
 	jmp @skip_blinky_move
 @dont_skip:
     ; Restore background at CURRENT position before moving
-    call restore_blinky_background
+    ;call restore_blinky_background
     
     ; Reset movement counter
     mov byte ptr [blinky_move_counter], 0
@@ -3141,7 +3329,7 @@ update_blinky proc near
     call maze_to_screen_blinky
     
     ; Save the background at the NEW position
-    call save_blinky_background
+    ;call save_blinky_background
     
     jmp @blinky_update_done
 
@@ -3671,7 +3859,7 @@ update_pinky proc near
     
 @time_to_move:
     ; Restore background at CURRENT position before moving
-    call restore_pinky_background
+    ;call restore_pinky_background
     
     ; Reset movement counter
     mov byte ptr [pinky_move_counter], 0
@@ -3727,7 +3915,7 @@ update_pinky proc near
     call maze_to_screen_pinky
     
     ; Save the background at the NEW position
-    call save_pinky_background
+    ;call save_pinky_background
     
     jmp @pinky_update_done
 
@@ -3739,7 +3927,7 @@ update_pinky proc near
     call maze_to_screen_pinky
     
     ; Save new background
-    call save_pinky_background
+    ;call save_pinky_background
     
 @skip_pinky_move:    
     ; No movement, do nothing to background
@@ -4241,7 +4429,7 @@ update_inky proc near
     
 @time_to_move2:
     ; Restore background at CURRENT position before moving
-    call restore_inky_background
+    ;call restore_inky_background
     
     ; Reset movement counter
     mov byte ptr [inky_move_counter], 0
@@ -4297,7 +4485,7 @@ update_inky proc near
     call maze_to_screen_inky
     
     ; Save the background at the NEW position
-    call save_inky_background
+    ;call save_inky_background
     
     jmp @inky_update_done2
 
@@ -4309,7 +4497,7 @@ update_inky proc near
     call maze_to_screen_inky
     
     ; Save new background
-    call save_inky_background
+    ;call save_inky_background
     
 @skip_inky_move3:    
     ; No movement, do nothing to background
@@ -4760,7 +4948,7 @@ update_clyde proc near
     
 @time_to_move3:
     ; Restore background at CURRENT position before moving
-    call restore_clyde_background
+    ;call restore_clyde_background
     
     ; Reset movement counter
     mov byte ptr [clyde_move_counter], 0
@@ -4816,7 +5004,7 @@ update_clyde proc near
     call maze_to_screen_clyde
     
     ; Save the background at the NEW position
-    call save_clyde_background
+    ;call save_clyde_background
     
     jmp @clyde_update_done2
 
@@ -4828,7 +5016,7 @@ update_clyde proc near
     call maze_to_screen_clyde
     
     ; Save new background
-    call save_clyde_background
+    ;call save_clyde_background
     
 @skip_clyde_move3:    
     ; No movement, do nothing to background
@@ -5668,6 +5856,17 @@ play_pacman_death_animation proc near
 play_pacman_death_animation endp
 
 
+update_all_ghosts proc near
+    push ax
+    
+    call update_blinky
+    call update_pinky
+    call update_inky
+    call update_clyde
+    
+    pop ax
+    ret
+update_all_ghosts endp
 
 ;-----------------------------------------------------
 ; exit_and_cls - Exits to DOS and clears screen
@@ -5681,7 +5880,7 @@ exit_and_cls endp
 
 delay_death_frame proc near
     push cx
-    mov cx, 25      ; Reduce from 80 to 25 for faster animation
+    mov cx, 5      ; Reduce from 80 to 25 for faster animation
     delay_loop:
         call vsync
         loop delay_loop
@@ -5699,6 +5898,15 @@ delay_death_frame_long proc near
     ret
 delay_death_frame_long endp
 
+delay_frame_v1 proc near
+    push cx
+    mov cx, 1      ; Just 1 vsync cycle
+    delay_loop_v1:
+        call vsync
+        loop delay_loop_v1
+    pop cx
+    ret
+delay_frame_v1 endp
 
 ;-----------------------------------------------------
 ; run_game - Main game loop with initialization and gameplay
@@ -5783,21 +5991,19 @@ run_game proc near
     call check_coin_collision
     
 game_loop:
-
+	call delay_frame_v1
     call restore_background
-    
+	call restore_all_ghosts_background
     mov ax, [player_x_pos]
     push ax
     mov ax, [player_y_pos]
     push ax
     
     call check_input
-    
     call update_clyde
     call update_inky
     call update_pinky
     call update_blinky
-
 	
     call check_player_blinky_collision
     cmp al, 1
@@ -5816,18 +6022,15 @@ game_loop:
     je is_game_over
     
     call check_coin_collision
-    
     call update_animation
-    
+	call save_background
+	call save_all_ghosts_background
     call draw_player_improved
-    
     call draw_all_ghosts
-    
     call display_score
 	call display_lives
 	
 	cmp [current_score], 1760
-
 	je win
 	
     call vsync
