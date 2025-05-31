@@ -1,5 +1,5 @@
 .model large
-.stack 1000h
+.stack 100h
 
 
 ;Not used, but if the var is undefined, it automatically makes it null if used
@@ -290,7 +290,7 @@ GOLD_ORANGE equ 16  ; Assuming you set up palette entry 16
     inky_sprite_data db 144 dup(?)
     clyde_sprite_data db 144 dup(?)
 
-		
+	exit_flag db 0
 
 	
 .code
@@ -2002,6 +2002,7 @@ check_input endp
 ; handle_menu_input - Processes menu input (Enter to start, 'o' to exit)
 ;-----------------------------------------------------
 handle_menu_input proc near
+	push ax
     menu_wait:
         mov ah, 00h       ; Wait for keypress
         int 16h
@@ -2009,9 +2010,11 @@ handle_menu_input proc near
         cmp al, 0Dh       ; Enter key
         je start_game
         
-        cmp al, 'o'       ; 'o' key
+        cmp al, 'Q'       ; 'o' key
         je exit_program1
-        
+		cmp al, 'q'       ; 'o' key
+        je exit_program1
+
 		cmp al, 'L'
 		je info_page1
 		
@@ -2020,20 +2023,23 @@ handle_menu_input proc near
     start_game:
         call clear_screen
         call run_game     ; This will never return
+		pop ax
         ret               ; Safety return (unreachable)
 	info_page1:
 		call clear_screen
 		call draw_info
 		call handle_info_page
+		pop ax
 		ret
     exit_program1:
-        call exit_and_cls ; This will terminate the program
-        ret               ; Safety return (unreachable)
+		pop ax
+		ret
 handle_menu_input endp
 
 
 
 handle_info_page proc near
+	push ax
     info_wait:
         mov ah, 00h       ; Wait for keypress
         int 16h
@@ -2050,16 +2056,19 @@ handle_info_page proc near
         call clear_screen
         call draw_menu
         call handle_menu_input
+		pop ax
         ret
         
     handle_tutorial:
         call clear_screen
         call draw_tutorial
         call handle_tutorial_page
+		pop ax
         ret
 handle_info_page endp
 
 handle_tutorial_page proc near
+	push ax
     tutorial_wait:
         mov ah, 00h       ; Wait for keypress
         int 16h
@@ -2076,15 +2085,18 @@ handle_tutorial_page proc near
 		call clear_screen
 		call draw_menu
 		call handle_menu_input
+		pop ax
 		ret
 	handle_information:
 		call clear_screen
 		call draw_info
 		call handle_info_page
+		pop ax
 		ret
 handle_tutorial_page endp
 
 handle_win_page proc near
+	push ax
 	call clear_screen
 	call draw_win
 
@@ -2104,7 +2116,8 @@ didnt_pick_any_option2:
     call run_game
     ret
 exit3:
-    call exit_and_cls
+    mov [exit_flag], 1
+	pop ax
 	ret
 handle_win_page endp
 
@@ -2559,6 +2572,7 @@ restore_background endp
 ; update_animation - Controls Pac-Man mouth animation frames
 ;-----------------------------------------------------
 update_animation proc near
+	push ax
     ; Only animate if moving
     cmp [is_moving], 1
     jne @reset_animation
@@ -2587,6 +2601,7 @@ update_animation proc near
     mov [frame_counter], 0
     
 @done:
+	pop ax
     ret
 update_animation endp
 
@@ -2611,6 +2626,7 @@ toggle_pause endp
 ;-----------------------------------------------------
 
 pause_menu proc near
+	push ax
     call clear_screen
     call draw_pause_menu
 
@@ -2627,13 +2643,16 @@ pause_loop:
     
     call clear_screen
     call run_game
-        
+    
 exit:
-    call exit_and_cls
+	call exit_and_cls
+	pop ax
+	ret
 pause_menu endp
 
 
 handle_game_over_menu proc near
+	push ax
 	call draw_game_over_menu
 
 didnt_pick_any_option:
@@ -2652,7 +2671,9 @@ didnt_pick_any_option:
     call run_game
         
 exit2:
-    call exit_and_cls
+	call exit_and_cls
+	pop ax
+    ret
 handle_game_over_menu endp
 
 
@@ -5912,11 +5933,11 @@ delay_frame_v1 endp
 ;-----------------------------------------------------
 run_game proc near
     call SetGraphic
-    ;call DrawMaze
+    call DrawMaze
     
     ; Load all ghost sprites into memory BEFORE the game starts
     
-    ;call maze_to_screen_blinky
+    call maze_to_screen_blinky
     
     ; Initialize Pinky
     mov byte ptr [pinky_in_ghost_house], 1
@@ -5924,7 +5945,7 @@ run_game proc near
     mov byte ptr [pinky_maze_x], 9
     mov byte ptr [pinky_maze_y], 9
     mov byte ptr [pinky_direction], 4
-    ;call maze_to_screen_pinky
+    call maze_to_screen_pinky
     
     ; Initialize Inky
     mov byte ptr [inky_in_ghost_house], 1
@@ -5937,7 +5958,7 @@ run_game proc near
     mov byte ptr [inky_target_x], 20
     mov byte ptr [inky_target_y], 20
     mov byte ptr [inky_move_counter], 0
-    ;call maze_to_screen_inky
+    call maze_to_screen_inky
     
     ; Initialize Clyde
     mov byte ptr [clyde_in_ghost_house], 1
@@ -5950,7 +5971,7 @@ run_game proc near
     mov byte ptr [clyde_target_x], 0
     mov byte ptr [clyde_target_y], 20
     mov byte ptr [clyde_move_counter], 0
-    ;call maze_to_screen_clyde
+    call maze_to_screen_clyde
     
     ; Initialize Blinky
     mov word ptr [current_score], 0
@@ -5960,83 +5981,85 @@ run_game proc near
     mov byte ptr [blinky_maze_x], 9
     mov byte ptr [blinky_maze_y], 7
     mov byte ptr [blinky_direction], 4
-    ;call maze_to_screen_blinky
-    ;call load_all_ghost_sprites
+    call maze_to_screen_blinky
+    call load_all_ghost_sprites
 
     push ax
     push cx
     push di
     push ds
     push es
-
     push ds        ; Copy DS to ES for stosb
-    pop es
 
     mov cx, 21*21
     mov di, offset coins_collected
     mov al, 0
     cld
     rep stosb
-
+	
+	
+    pop ds
     pop es         ; Restore original ES
     pop ds         ; Restore original DS
     pop di
     pop cx
     pop ax
+	
     
-    ;call DrawCoins
+    call DrawCoins
     
-    ;call draw_player_improved
-    ;call draw_all_ghosts
-    ;call check_coin_collision
+    call draw_player_improved
+    call draw_all_ghosts
+    call check_coin_collision
     
 game_loop:
-	;call delay_frame_v1
-	;call restore_background
-	;call restore_all_ghosts_background
-    ;mov ax, [player_x_pos]
-    ;push ax
-   ; mov ax, [player_y_pos]
-   ; push ax
+	call delay_frame_v1
+	call restore_background
+	call restore_all_ghosts_background
+    mov ax, [player_x_pos]
+    push ax
+    mov ax, [player_y_pos]
+    push ax
     
      call check_input
-   ; call update_clyde
-  ;  call update_inky
-  ;  call update_pinky
-   ; call update_blinky
+
+   call update_clyde
+  call update_inky
+  call update_pinky
+   call update_blinky
 	
-   ; call check_player_blinky_collision
-    ;cmp al, 1
-    ;je is_game_over
+   call check_player_blinky_collision
+    cmp al, 1
+    je is_game_over
     
-    ;call check_player_inky_collision
-    ;cmp al, 1
-    ;je is_game_over
+    call check_player_inky_collision
+    cmp al, 1
+    je is_game_over
     
-    ;call check_player_pinky_collision
-    ;cmp al, 1
-    ;je is_game_over
+    call check_player_pinky_collision
+    cmp al, 1
+    je is_game_over
     
-   ; call check_player_clyde_collision
-    ;cmp al, 1
-    ;je is_game_over
+   call check_player_clyde_collision
+    cmp al, 1
+    je is_game_over
     
-    ;call check_coin_collision
-   ; call update_animation
-	;call save_background
-	;call save_all_ghosts_background
-   ; call draw_player_improved
-   ; call draw_all_ghosts
-   ; call display_score
-	;call display_lives
+    call check_coin_collision
+   call update_animation
+	call save_background
+	call save_all_ghosts_background
+   call draw_player_improved
+   call draw_all_ghosts
+   call display_score
+	call display_lives
 	
-	;cmp [current_score], 1760
-	;je win
+	cmp [current_score], 1760
+	je win
 	
-    ;call vsync
+    call vsync
     
     jmp game_loop
-    
+	
 is_game_over:
     cmp player_lives, 1
     je game_over
@@ -6082,9 +6105,11 @@ win:
 run_game endp
 
 exit_and_cls proc near
+	push ax
     call ExitGraphic  ; Return to text mode
     mov ax, 4C00h     ; DOS exit function
     int 21h           ; Call DOS
+	pop ax
     ret               ; This will never execute
 exit_and_cls endp
 
@@ -6094,5 +6119,6 @@ start:
    call SetGraphic
    call draw_menu
    call handle_menu_input 
+   call exit_and_cls
    
 END start
