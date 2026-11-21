@@ -4,7 +4,7 @@ A full recreation of the classic arcade game **Pac-Man**, written from scratch i
 There's no game engine and there are no libraries. Every pixel, sprite, ghost decision and keypress is handled directly in 16-bit real mode in VGA **Mode 13h** (320×200, 256 colors).
 
 <p align="center">
-  <img src="screenshots/menu.png" width="49%" />&nbsp;<img src="screenshots/chase.png" width="49%" />
+  <img src="screenshots/chase.png" width="70%" />
 </p>
 
 > Pac-Man is owned by Bandai Namco. This is a non-commercial fan project made for learning.
