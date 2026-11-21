@@ -1,4 +1,8 @@
 *.obj
+*.OBJ
 *.exe
+*.EXE
 *.map
+*.MAP
 *.tr
+*.TR
