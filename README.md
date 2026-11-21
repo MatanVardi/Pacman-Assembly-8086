@@ -4,8 +4,7 @@ A full recreation of the classic arcade game **Pac-Man**, written from scratch i
 There's no game engine and there are no libraries. Every pixel, sprite, ghost decision and keypress is handled directly in 16-bit real mode in VGA **Mode 13h** (320×200, 256 colors).
 
 <p align="center">
-  <img src="screenshots/menu.png" width="45%" />
-  <img src="screenshots/chase.png" width="45%" />
+  <img src="screenshots/menu.png" width="49%" />&nbsp;<img src="screenshots/chase.png" width="49%" />
 </p>
 
 > Pac-Man is owned by Bandai Namco. This is a non-commercial fan project made for learning.
@@ -28,17 +27,23 @@ The technical side focuses on:
 
 ## Screenshots
 
-| Main Menu | Gameplay | Pause |
-|:---:|:---:|:---:|
-| ![Menu](screenshots/menu.png) | ![Gameplay](screenshots/gameplay.png) | ![Pause](screenshots/pause.png) |
-
-| Info | How to Play | Death Animation |
-|:---:|:---:|:---:|
-| ![Info](screenshots/info.png) | ![Tutorial](screenshots/tutorial.png) | ![Death](screenshots/death.png) |
-
-| You Win | Game Over | Debugging in Turbo Debugger |
-|:---:|:---:|:---:|
-| ![Win](screenshots/win.png) | ![Game Over](screenshots/game_over.png) | ![Debugger](screenshots/debugger.png) |
+<table>
+  <tr>
+    <td align="center"><b>Main Menu</b><br><img src="screenshots/menu.png" width="260"></td>
+    <td align="center"><b>Gameplay</b><br><img src="screenshots/gameplay.png" width="260"></td>
+    <td align="center"><b>Pause</b><br><img src="screenshots/pause.png" width="260"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Info</b><br><img src="screenshots/info.png" width="260"></td>
+    <td align="center"><b>How to Play</b><br><img src="screenshots/tutorial.png" width="260"></td>
+    <td align="center"><b>Death Animation</b><br><img src="screenshots/death.png" width="260"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>You Win</b><br><img src="screenshots/win.png" width="260"></td>
+    <td align="center"><b>Game Over</b><br><img src="screenshots/game_over.png" width="260"></td>
+    <td align="center"><b>Turbo Debugger</b><br><img src="screenshots/debugger.png" width="260"></td>
+  </tr>
+</table>
 
 ---
 
@@ -101,15 +106,15 @@ To chase Pac-Man, a ghost needs to know **which way to move**. Here's the idea s
 
 **1. Moving with a velocity vector.** Every frame, the ghost's position is updated by its velocity vector `V = (Vx, Vy)`:
 
-<p align="center"><img src="diagrams/ghost_velocity.png" width="75%" /></p>
+<p align="center"><img src="screenshots/ghost_velocity.png" width="75%" /></p>
 
 **2. Splitting the velocity into X and Y.** If the ghost moves at speed `Velocity` and at some `angle`, trigonometry gives the two parts of the vector:
 
-<p align="center"><img src="diagrams/velocity_components.png" width="85%" /></p>
+<p align="center"><img src="screenshots/velocity_components.png" width="85%" /></p>
 
 **3. Finding the angle toward Pac-Man.** The angle comes from the difference between Pac-Man's position and the ghost's:
 
-<p align="center"><img src="diagrams/angle_to_pacman.png" width="85%" /></p>
+<p align="center"><img src="screenshots/angle_to_pacman.png" width="85%" /></p>
 
 Because the ghosts move on a grid and can only go up, down, left or right, the game uses a simpler version of this idea. It compares the X difference (`Pacman_X - Ghost_X`) with the Y difference (`Pacman_Y - Ghost_Y`) and moves along the axis where the gap is bigger. This avoids slow trigonometry on the 8086 but still moves the ghost toward its target.
 
